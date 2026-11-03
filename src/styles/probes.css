@@ -3,16 +3,27 @@
  * 放在独立样式文件里，避免改动上游逐字移植的 main.css。
  */
 
-.node-probes {
-  grid-template-columns: minmax(0, 1fr);
+/*
+ * 恢复上游的「延迟 / 丢包」两块面板：每块面板里按三网各列一行，
+ * 行内是「线路 + 窗口平均」，下面一条该线路自己的 20 桶柱带。
+ */
+.node-probes .node-probe {
+  gap: 4px;
 }
 
 .node-probe__row {
-  display: grid;
-  grid-template-columns: 38px 52px minmax(0, 1fr) 46px;
-  align-items: center;
-  gap: 6px;
+  display: flex;
   min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.node-probe__row-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   font-size: 11px;
   line-height: 1;
 }
@@ -24,16 +35,9 @@
   white-space: nowrap;
 }
 
-.node-probe__value,
-.node-probe__loss {
+.node-probe__value {
   overflow: hidden;
   white-space: nowrap;
-}
-
-.node-probe__loss {
-  color: var(--ink);
-  font-weight: 500;
-  text-align: right;
 }
 
 .node-probe__count {
@@ -41,20 +45,30 @@
   font-size: 10px;
 }
 
-.node-probe__loss.is-signal-1 { color: var(--signal-1); }
-.node-probe__loss.is-signal-2 { color: var(--signal-2); }
-.node-probe__loss.is-signal-3 { color: var(--signal-3); }
-.node-probe__loss.is-signal-4 { color: var(--signal-4); }
-.node-probe__loss.is-signal-5 { color: var(--signal-5); }
+/* 三网面板里的柱带比单线路时矮一点，给三行留出高度。 */
+.node-probe__row .node-probe__bars {
+  height: 5px;
+  min-height: 5px;
+}
 
-.node-card--mini .node-probe__row,
+.node-probe__value.is-signal-1 { color: var(--signal-1); }
+.node-probe__value.is-signal-2 { color: var(--signal-2); }
+.node-probe__value.is-signal-3 { color: var(--signal-3); }
+.node-probe__value.is-signal-4 { color: var(--signal-4); }
+.node-probe__value.is-signal-5 { color: var(--signal-5); }
+
+.node-card--mini .node-probe__row-head,
 .node-card--mini .node-probe__count {
   font-size: 10px;
 }
 
 .node-card--mini .node-probe__row {
-  grid-template-columns: 32px 46px minmax(0, 1fr) 40px;
-  gap: 4px;
+  gap: 2px;
+}
+
+.node-card--mini .node-probe__row .node-probe__bars {
+  height: 4px;
+  min-height: 4px;
 }
 
 /* 列表固定 64px 行高内塞下「运行时间 + 三网三行」。 */
