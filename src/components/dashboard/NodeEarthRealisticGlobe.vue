@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { GlobeInstance } from 'globe.gl'
-import type { MeshPhongMaterial, Texture } from 'three'
+import type { Mesh, ShaderMaterial, Texture } from 'three'
 import {
   useDocumentVisibility,
   useElementSize,
@@ -9,8 +9,8 @@ import {
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import EARTH_DAY_TEXTURE from '@/assets/earth/earth-blue-marble.jpg'
 import EARTH_NIGHT_TEXTURE from '@/assets/earth/earth-night.jpg'
-import EARTH_BUMP_MAP from '@/assets/earth/earth-topology.png'
 import EARTH_SPECULAR_MAP from '@/assets/earth/earth-water.png'
+import EARTH_CLOUDS_TEXTURE from '@/assets/earth/earth-clouds'
 import { useServerGeoClusters } from '@/composables/useServerGeoClusters'
 import { flagUrl } from '@/utils/flags'
 import type { GlassServer } from '@/types/glassmorphism'
@@ -32,10 +32,107 @@ const elementVisible = useElementVisibility(containerRef)
 const shouldRender = computed(() => documentVisibility.value === 'visible' && elementVisible.value)
 
 let globe: GlobeInstance | null = null
-let globeMaterial: MeshPhongMaterial | null = null
-let waterSpecularMap: Texture | null = null
+let globeMaterial: ShaderMaterial | null = null
+let cloudMesh: Mesh | null = null
+let cloudMaterial: ShaderMaterial | null = null
+let cloudFrame: number | null = null
+const loadedTextures: Texture[] = []
 let loadingGlobe = false
 let destroyed = false
+
+/*
+ * 贴图地球用「真实昼夜」着色：白天的蓝大理石贴图按太阳方向做漫反射，
+ * 夜面用城市灯光贴图，再叠一层真实云层与海面高光。
+ *
+ * 旧实现把整张贴图交给 MeshPhongMaterial，并用 `emissive` 加蓝色底光：
+ * 亮色模式下整颗星球被蓝灰色蒙版洗掉，暗色模式下又只剩一张几乎全黑的夜景图。
+ * 这里改为自写着色器，颜色只来自真实贴图与白色阳光，不再给地球整体染色。
+ */
+const EARTH_VERTEX_SHADER = `
+varying vec2 vEarthUv;
+varying vec3 vEarthNormal;
+varying vec3 vEarthPosition;
+
+void main() {
+  vEarthUv = uv;
+  vEarthNormal = normalize(mat3(modelMatrix) * normal);
+  vEarthPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`
+
+const EARTH_FRAGMENT_SHADER = `
+uniform sampler2D uDayMap;
+uniform sampler2D uNightMap;
+uniform sampler2D uWaterMap;
+uniform vec3 uSunDirection;
+uniform float uNightIntensity;
+uniform float uNightAmbient;
+uniform float uWaterStrength;
+
+varying vec2 vEarthUv;
+varying vec3 vEarthNormal;
+varying vec3 vEarthPosition;
+
+void main() {
+  vec3 normal = normalize(vEarthNormal);
+  vec3 sun = normalize(uSunDirection);
+  float sunAmount = dot(normal, sun);
+
+  // 柔和的晨昏线，避免昼夜之间出现硬切边。
+  float dayMix = smoothstep(-0.18, 0.18, sunAmount);
+
+  vec3 dayColor = texture2D(uDayMap, vEarthUv).rgb;
+  vec3 nightColor = texture2D(uNightMap, vEarthUv).rgb;
+
+  // 白天：白色阳光 + 少量环境光；夜面：城市灯光 + 极弱的地表反照。
+  float diffuse = clamp(sunAmount, 0.0, 1.0);
+  vec3 dayLit = dayColor * (0.42 + 0.68 * diffuse);
+  vec3 nightLit = nightColor * uNightIntensity + dayColor * uNightAmbient;
+  vec3 color = mix(nightLit, dayLit, dayMix);
+
+  // 海面镜面高光：earth-water 白色为海洋，陆地不反光。
+  vec3 viewDir = normalize(cameraPosition - vEarthPosition);
+  vec3 halfDir = normalize(sun + viewDir);
+  float water = texture2D(uWaterMap, vEarthUv).r;
+  float specular = pow(max(dot(normal, halfDir), 0.0), 64.0) * water;
+  color += vec3(0.86, 0.93, 1.0) * specular * uWaterStrength * dayMix;
+
+  gl_FragColor = vec4(color, 1.0);
+  #include <colorspace_fragment>
+}
+`
+
+const CLOUD_VERTEX_SHADER = `
+varying vec2 vCloudUv;
+varying vec3 vCloudNormal;
+
+void main() {
+  vCloudUv = uv;
+  vCloudNormal = normalize(mat3(modelMatrix) * normal);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`
+
+const CLOUD_FRAGMENT_SHADER = `
+uniform sampler2D uCloudMap;
+uniform vec3 uSunDirection;
+uniform float uCloudOpacity;
+uniform float uNightAmbient;
+
+varying vec2 vCloudUv;
+varying vec3 vCloudNormal;
+
+void main() {
+  float alpha = texture2D(uCloudMap, vCloudUv).r * uCloudOpacity;
+  if (alpha < 0.004) discard;
+
+  float sunAmount = clamp(dot(normalize(vCloudNormal), normalize(uSunDirection)), 0.0, 1.0);
+  float light = mix(uNightAmbient, 1.0, sunAmount);
+  gl_FragColor = vec4(vec3(0.55 + 0.65 * light), alpha);
+  #include <colorspace_fragment>
+}
+`
 
 interface GlobePoint {
   id: string
@@ -76,10 +173,6 @@ const labelsData = computed<GlobeLabel[]>(() => regionClusters.value.map((cluste
   lng: cluster.coord[1],
   code: cluster.code,
 })))
-
-function earthTextureUrl(): string {
-  return props.isDark ? EARTH_NIGHT_TEXTURE : EARTH_DAY_TEXTURE
-}
 
 function pointColor(point: object): string {
   const data = point as GlobePoint
@@ -133,19 +226,25 @@ function applyControls(): void {
   controls.rotateSpeed = 0.55
 }
 
+function setUniform(material: ShaderMaterial | null, name: string, value: number): void {
+  const uniform = material?.uniforms[name]
+  if (uniform) uniform.value = value
+}
+
 function applyMaterialStyle(): void {
-  if (!globe || !globeMaterial) return
-  globe.globeImageUrl(earthTextureUrl())
-  globeMaterial.bumpScale = props.isDark ? 0.02 : 0.03
-  globeMaterial.shininess = props.isDark ? 8 : 14
-  globeMaterial.emissive.set(props.isDark ? 0x1E3A5F : 0x355C7D)
-  globeMaterial.emissiveIntensity = props.isDark ? 0.48 : 0.32
-  globeMaterial.needsUpdate = true
+  if (!globe) return
+
+  setUniform(globeMaterial, 'uNightIntensity', props.isDark ? 0.95 : 0.5)
+  setUniform(globeMaterial, 'uNightAmbient', props.isDark ? 0.045 : 0.18)
+  setUniform(globeMaterial, 'uWaterStrength', props.isDark ? 0.55 : 0.4)
+  setUniform(cloudMaterial, 'uCloudOpacity', props.isDark ? 0.36 : 0.5)
+  setUniform(cloudMaterial, 'uNightAmbient', props.isDark ? 0.04 : 0.2)
+
   globe
     .pointColor(pointColor)
     .ringColor(() => (props.isDark ? 'rgba(45, 212, 191, 0.34)' : 'rgba(14, 165, 233, 0.28)'))
-    .atmosphereColor(props.isDark ? '#38bdf8' : '#60a5fa')
-    .atmosphereAltitude(props.isDark ? 0.14 : 0.11)
+    .atmosphereColor(props.isDark ? '#7dd3fc' : '#93c5fd')
+    .atmosphereAltitude(props.isDark ? 0.13 : 0.1)
 }
 
 function syncDataToGlobe(): void {
@@ -154,6 +253,74 @@ function syncDataToGlobe(): void {
     .pointsData(pointsData.value)
     .ringsData(pointsData.value)
     .htmlElementsData(labelsData.value)
+}
+
+type ThreeModule = typeof import('three')
+
+function loadTexture(THREE: ThreeModule, url: string, srgb: boolean): Texture {
+  const texture = new THREE.TextureLoader().load(url)
+  if (srgb) texture.colorSpace = THREE.SRGBColorSpace
+  texture.anisotropy = 4
+  loadedTextures.push(texture)
+  return texture
+}
+
+function createEarthMaterial(THREE: ThreeModule): ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uDayMap: { value: loadTexture(THREE, EARTH_DAY_TEXTURE, true) },
+      uNightMap: { value: loadTexture(THREE, EARTH_NIGHT_TEXTURE, true) },
+      uWaterMap: { value: loadTexture(THREE, EARTH_SPECULAR_MAP, false) },
+      uSunDirection: { value: new THREE.Vector3(-0.34, 0.52, 0.78).normalize() },
+      uNightIntensity: { value: 1 },
+      uNightAmbient: { value: 0.05 },
+      uWaterStrength: { value: 0.55 },
+    },
+    vertexShader: EARTH_VERTEX_SHADER,
+    fragmentShader: EARTH_FRAGMENT_SHADER,
+  })
+}
+
+function createCloudLayer(THREE: ThreeModule, sunDirection: unknown): { mesh: Mesh, material: ShaderMaterial } {
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uCloudMap: { value: loadTexture(THREE, EARTH_CLOUDS_TEXTURE, false) },
+      uSunDirection: { value: sunDirection },
+      uCloudOpacity: { value: 0.4 },
+      uNightAmbient: { value: 0.05 },
+    },
+    vertexShader: CLOUD_VERTEX_SHADER,
+    fragmentShader: CLOUD_FRAGMENT_SHADER,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.FrontSide,
+  })
+
+  // three-globe 的地球半径为 100，云层略高一点避免与地表共面。
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(100.45, 64, 64), material)
+  // 与 three-globe 的默认球体保持一致：正对本初子午线，云图才会和地表贴图对齐。
+  mesh.rotation.y = -Math.PI / 2
+  mesh.renderOrder = 1
+  return { mesh, material }
+}
+
+function cloudTick(): void {
+  cloudFrame = null
+  if (!cloudMesh || !shouldRender.value || props.stopped) return
+  // 云层相对地表缓慢西移，速度约为地球自转的十分之一。
+  cloudMesh.rotation.y += 0.00008
+  cloudFrame = requestAnimationFrame(cloudTick)
+}
+
+function startCloudDrift(): void {
+  if (cloudFrame !== null || props.stopped) return
+  cloudFrame = requestAnimationFrame(cloudTick)
+}
+
+function stopCloudDrift(): void {
+  if (cloudFrame === null) return
+  cancelAnimationFrame(cloudFrame)
+  cloudFrame = null
 }
 
 async function startGlobe(): Promise<void> {
@@ -177,8 +344,6 @@ async function startGlobe(): Promise<void> {
       .width(width)
       .height(height)
       .backgroundColor('rgba(0,0,0,0)')
-      .globeImageUrl(earthTextureUrl())
-      .bumpImageUrl(EARTH_BUMP_MAP)
       .showAtmosphere(true)
       .pointsData(pointsData.value)
       .pointLat('lat')
@@ -210,16 +375,14 @@ async function startGlobe(): Promise<void> {
     renderer.setClearColor(0x000000, 0)
     renderer.domElement.style.background = 'transparent'
 
-    const material = globe.globeMaterial()
-    if ('shininess' in material) {
-      globeMaterial = material as MeshPhongMaterial
-      waterSpecularMap = new THREE.TextureLoader().load(EARTH_SPECULAR_MAP, () => {
-        if (!globeMaterial) return
-        globeMaterial.specularMap = waterSpecularMap
-        globeMaterial.needsUpdate = true
-      })
-      globeMaterial.specular = new THREE.Color(props.isDark ? 0x64748B : 0x475569)
-    }
+    const material = createEarthMaterial(THREE)
+    globe.globeMaterial(material)
+    globeMaterial = material
+
+    const cloud = createCloudLayer(THREE, material.uniforms.uSunDirection?.value)
+    globe.scene().add(cloud.mesh)
+    cloudMesh = cloud.mesh
+    cloudMaterial = cloud.material
 
     const frontLight = new THREE.DirectionalLight(0xFFFFFF, props.isDark ? 0.9 : 1.0)
     frontLight.position.set(1.2, 1.1, 1.6)
@@ -238,6 +401,7 @@ async function startGlobe(): Promise<void> {
     applyControls()
     resetPointOfView(0)
     if (!shouldRender.value) globe.pauseAnimation()
+    else startCloudDrift()
   } finally {
     loadingGlobe = false
   }
@@ -246,12 +410,21 @@ async function startGlobe(): Promise<void> {
 function stopGlobe(): void {
   if (!globe) return
 
+  stopCloudDrift()
   globe.pauseAnimation()
+
+  if (cloudMesh) globe.scene().remove(cloudMesh)
+  cloudMesh?.geometry.dispose()
+  cloudMaterial?.dispose()
+  globeMaterial?.dispose()
+  for (const texture of loadedTextures) texture.dispose()
+  loadedTextures.length = 0
+  cloudMesh = null
+  cloudMaterial = null
+  globeMaterial = null
+
   globe._destructor()
   globe = null
-  globeMaterial = null
-  waterSpecularMap?.dispose()
-  waterSpecularMap = null
   if (globeHostRef.value) globeHostRef.value.replaceChildren()
 }
 
@@ -279,7 +452,12 @@ watch(() => props.isDark, () => {
 
 watch(() => props.stopped, (stopped) => {
   applyControls()
-  if (stopped) resetPointOfView(300)
+  if (stopped) {
+    resetPointOfView(300)
+    stopCloudDrift()
+    return
+  }
+  if (shouldRender.value) startCloudDrift()
 })
 
 watch(shouldRender, (visible) => {
@@ -288,10 +466,12 @@ watch(shouldRender, (visible) => {
     globe.resumeAnimation()
     applyControls()
     resizeGlobe()
+    startCloudDrift()
     return
   }
   globe.pauseAnimation()
   applyControls()
+  stopCloudDrift()
 })
 </script>
 
