@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { ProbeTarget } from '@/types/cfsm'
 import type { GlassServer } from '@/types/glassmorphism'
 import type { NodeCardSize } from '@/theme/settings'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import AppProgressThin from '@/components/ui/AppProgressThin.vue'
 import { resolveRegionCoordinates } from '@/domain/advanced-tools'
-import { probeSeriesFor, windowAverage, type ProbeSeriesMap } from '@/domain/probe-window'
+import { homepageProbes, probeSeriesFor, windowAverage, type ProbeSeriesMap } from '@/domain/probe-window'
 import {
   daysUntilExpiry,
   remainingValue,
@@ -190,52 +191,57 @@ function emptyBars(metric: string): PingBar[] {
   }))
 }
 
-const primaryProbe = computed(() => props.server.latency[0] ?? null)
-
-/*
- * 延迟与丢包显示的是**窗口平均**，与上游一致：Komari `useNodePingDisplay` 的
- * `latencyDisplay` / `lossDisplay` 取的是 `pingStats.avgLatency` / `avgLoss`，
- * 不是最近一次采样。窗口就是 `/api/servers` 已经返回的 `ping` / `loss`
- * （最近 2 小时、最多 20 个真实采样），因此不需要任何额外请求。
- *
- * 站点关闭三网详情时后端返回空数组，此时回落到本次上报的最新值，并在标题里
- * 说明口径，不把"没有窗口"伪装成平均值。
- */
-const latencyWindow = computed(() => {
-  const target = primaryProbe.value?.target
-  return target ? windowAverage(props.server.history.latencySeries, target) : { value: null, samples: 0 }
-})
-const lossWindow = computed(() => {
-  const target = primaryProbe.value?.target
-  return target ? windowAverage(props.server.history.packetLossSeries, target) : { value: null, samples: 0 }
-})
-const latencyText = computed(() => (
-  latencyWindow.value.value === null
-    ? formatLatency(primaryProbe.value?.latency ?? false)
-    : formatLatency(latencyWindow.value.value)
-))
-const lossText = computed(() => (
-  lossWindow.value.value === null
-    ? formatProbePercent(primaryProbe.value?.packetLoss ?? false)
-    : formatProbePercent(lossWindow.value.value)
-))
-
-function probeTitle(label: string, samples: number): string | undefined {
-  const probe = primaryProbe.value
-  if (!probe) return undefined
-  return samples === 0
-    ? `${probe.label} 最近一次上报`
-    : `${probe.label} ${label}：按窗口内 ${samples} 个真实采样计算`
+interface ProbeRow {
+  key: ProbeTarget
+  label: string
+  latencyText: string
+  lossText: string
+  latencyTitle: string
+  lossTitle: string
+  latencyBars: PingBar[]
+  lossTone: string
 }
 
-const latencyTitle = computed(() => probeTitle('平均延迟', latencyWindow.value.samples))
-const lossTitle = computed(() => probeTitle('平均丢包', lossWindow.value.samples))
+/*
+ * 首页同时展示三网（电信 / 联通 / 移动）的延迟与丢包。
+ *
+ * 数值口径不变：优先取窗口平均（Komari `useNodePingDisplay` 的 avgLatency / avgLoss），
+ * 站点关闭三网详情、窗口为空时回落到本次上报的最新值。每条线路各自一条柱带，
+ * 柱带只画该线路自己的时间桶，`null` 原位保留为空洞柱。
+ */
+const probeRows = computed<ProbeRow[]>(() => homepageProbes(props.server.latency).map((probe) => {
+  const latencyWindow = windowAverage(props.server.history.latencySeries, probe.target)
+  const lossWindow = windowAverage(props.server.history.packetLossSeries, probe.target)
+  const latencyValue = latencyWindow.value ?? probe.latency
+  const lossValue = lossWindow.value ?? probe.packetLoss
+  return {
+    key: probe.target,
+    label: probe.label,
+    latencyText: formatLatency(latencyValue),
+    lossText: formatProbePercent(lossValue),
+    latencyTitle: probeTitle(probe.label, '平均延迟', latencyWindow.samples),
+    lossTitle: probeTitle(probe.label, '平均丢包', lossWindow.samples),
+    latencyBars: buildBars(
+      'latency',
+      props.server.history.latencySeries,
+      latencyToneClass,
+      probe.target,
+    ),
+    lossTone: typeof lossValue === 'number' ? lossToneClass(lossValue).split(' ')[0] ?? '' : '',
+  }
+}))
+
+function probeTitle(label: string, metric: string, samples: number): string {
+  return samples === 0
+    ? `${label} ${metric.replace('平均', '')}：最近一次上报`
+    : `${label} ${metric}：按窗口内 ${samples} 个真实采样计算`
+}
 
 /*
  * 一根柱子 = 一个时间桶，与 Komari `useNodePingDisplay.buildPingBars` 一致
  * （上游是 `points.map(...)`，逐点渲染）。
  *
- * 柱子只画**当前面板所标注的那个探测目标**的序列。此前的实现把
+ * 柱子只画**当前行所标注的那个探测目标**的序列。此前的实现把
  * 20 个时间桶 × 4 条线路拍平成一个数组，还顺手过滤掉了空洞，
  * 结果既不是时间序列、柱数随缺口变化，柱子与标题上的线路也对不上——
  * 这就是第 14 轮修掉的 BUG-001。
@@ -247,26 +253,15 @@ function buildBars(
   metric: string,
   series: ProbeSeriesMap,
   tone: (value: number) => string,
+  target: ProbeTarget,
 ): PingBar[] {
-  const target = primaryProbe.value?.target
-  const points = target ? probeSeriesFor(series, target) : []
+  const points = probeSeriesFor(series, target)
   if (points.length === 0) return emptyBars(metric)
   return points.map((point, index) => ({
     key: `${metric}-${point.timestamp}-${index}`,
     className: typeof point.value === 'number' ? tone(point.value) : 'is-gap',
   }))
 }
-
-const latencyBars = computed(() => buildBars(
-  'latency',
-  props.server.history.latencySeries,
-  latencyToneClass,
-))
-const lossBars = computed(() => buildBars(
-  'loss',
-  props.server.history.packetLossSeries,
-  lossToneClass,
-))
 
 function handleKeydown(event: KeyboardEvent): void {
   if (event.key !== 'Enter' && event.key !== ' ') return
@@ -524,29 +519,27 @@ function hideMissingImage(event: Event): void {
         </div>
       </div>
 
-      <div v-if="primaryProbe" class="node-probes">
+      <div v-if="probeRows.length > 0" class="node-probes">
         <div class="node-probe">
-          <div class="node-probe__head" :title="latencyTitle">
-            <span>延迟</span>
-            <span class="node-probe__value">{{ latencyText }}</span>
+          <div class="node-probe__head">
+            <span>延迟 / 丢包</span>
+            <span class="node-probe__count">{{ probeRows.length }} 网</span>
           </div>
           <div
-            class="node-probe__bars"
-            :style="{ gridTemplateColumns: `repeat(${latencyBars.length}, minmax(0, 1fr))` }"
+            v-for="row in probeRows"
+            :key="row.key"
+            class="node-probe__row"
+            :title="`${row.latencyTitle}\n${row.lossTitle}`"
           >
-            <span v-for="bar in latencyBars" :key="bar.key" :class="bar.className" />
-          </div>
-        </div>
-        <div class="node-probe">
-          <div class="node-probe__head" :title="lossTitle">
-            <span>丢包</span>
-            <span class="node-probe__value">{{ lossText }}</span>
-          </div>
-          <div
-            class="node-probe__bars"
-            :style="{ gridTemplateColumns: `repeat(${lossBars.length}, minmax(0, 1fr))` }"
-          >
-            <span v-for="bar in lossBars" :key="bar.key" :class="bar.className" />
+            <span class="node-probe__label">{{ row.label }}</span>
+            <span class="node-probe__value">{{ row.latencyText }}</span>
+            <span
+              class="node-probe__bars"
+              :style="{ gridTemplateColumns: `repeat(${row.latencyBars.length}, minmax(0, 1fr))` }"
+            >
+              <span v-for="bar in row.latencyBars" :key="bar.key" :class="bar.className" />
+            </span>
+            <span class="node-probe__loss" :class="row.lossTone">{{ row.lossText }}</span>
           </div>
         </div>
       </div>
