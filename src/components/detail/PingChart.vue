@@ -13,7 +13,6 @@ import VChart from 'vue-echarts'
 import AppEmpty from '@/components/ui/AppEmpty.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import AppTabs, { type AppTabItem } from '@/components/ui/AppTabs.vue'
-import PingLossStrip from '@/components/detail/PingLossStrip.vue'
 import { DEFAULT_PROBE_LABELS } from '@/constants/probes'
 import {
   HISTORY_RANGE_LABELS,
@@ -84,9 +83,6 @@ const errorCopy = computed(() => issueCopy(pingHistoryIssue.value, 'history'))
 const selected = ref<ProbeTarget[]>([])
 /* 开关状态只活在本组件的生命周期里；实时推送、主题切换与重绘都不会重置它。 */
 const hideSpikes = ref(false)
-/* 图 2 的两个开关：丢包色带与断点连线。都只影响绘图，不改统计。 */
-const showLossBand = ref(true)
-const connectNulls = ref(false)
 /* 图例的显示状态。显式交给图表，按钮上的计数才能与画出来的线保持一致。 */
 const legendSelected = ref<Record<string, boolean>>({})
 const helpOpen = ref(false)
@@ -171,56 +167,24 @@ function onLegendSelect(event: unknown): void {
   if (isFlagMap(event.selected)) legendSelected.value = { ...event.selected }
 }
 
-const option = computed(() => {
-  const base = pingChartOption({
-    rows: rows.value,
-    hours: pingHistoryHours.value,
-    theme: getPingChartThemeColors(theme.resolvedTheme === 'dark'),
-    tasks: tasks.value,
-    selected: selectedTasks.value,
-    accessible: accessible.value,
-    hideSpikes: hideSpikes.value,
-    spikeMasks: spikeMasks.value,
-    legendSelected: legendSelected.value,
-  })
-  // 「断点连线」只改绘图选项；底层的行数据与统计不变。
-  return {
-    ...base,
-    series: base.series.map((item) => ({ ...item, connectNulls: connectNulls.value })),
-  }
-})
+const option = computed(() => pingChartOption({
+  rows: rows.value,
+  hours: pingHistoryHours.value,
+  theme: getPingChartThemeColors(theme.resolvedTheme === 'dark'),
+  tasks: tasks.value,
+  selected: selectedTasks.value,
+  accessible: accessible.value,
+  hideSpikes: hideSpikes.value,
+  spikeMasks: spikeMasks.value,
+  legendSelected: legendSelected.value,
+}))
+
+function avgText(task: PingTask): string {
+  return task.stats.avg === null ? '-' : `${Math.round(task.stats.avg)}ms`
+}
 
 function lossText(task: PingTask): string {
   return task.stats.loss === null ? '-' : `${task.stats.loss.toFixed(2)}%`
-}
-
-function latestText(task: PingTask): string {
-  return task.stats.latest === null ? '-' : `${Math.round(task.stats.latest)}ms`
-}
-
-const coverageLabel = computed(() => `覆盖完整 ${HISTORY_RANGE_LABELS[pingHistoryHours.value]}`)
-
-/* 采样间隔按真实行时间戳取中位数，长区间被后端聚合变粗时也能如实写出来。 */
-const samplingLabel = computed(() => {
-  const timestamps = rows.value.filter((row) => row.point !== null).map((row) => row.timestamp)
-  if (timestamps.length < 2) return null
-  const deltas = timestamps
-    .slice(1)
-    .map((timestamp, index) => timestamp - (timestamps[index] ?? timestamp))
-    .filter((delta) => delta > 0)
-  if (deltas.length === 0) return null
-  deltas.sort((left, right) => left - right)
-  const median = deltas[Math.floor(deltas.length / 2)] ?? 0
-  if (median <= 0) return null
-  const minutes = median / 60_000
-  const text = minutes >= 60
-    ? `${(minutes / 60).toFixed(minutes % 60 === 0 ? 0 : 1)} 小时`
-    : `${minutes.toFixed(minutes % 1 === 0 ? 0 : 1)} 分钟`
-  return `每 ${text}一个采样点`
-})
-
-function refresh(): void {
-  void detail.loadPingHistory(pingHistoryHours.value)
 }
 
 function statItems(task: PingTask): Array<{ label: string, value: string }> {
@@ -283,19 +247,17 @@ function retry(): void {
 
 <template>
   <section class="ping-chart" aria-label="延迟历史">
-    <div class="ping-chart__header">
-      <h3 class="ping-chart__title">
-        Ping 图表
-      </h3>
-      <div class="ping-chart__meta">
-        <span class="ping-chart__meta-pill">{{ coverageLabel }}</span>
-        <span v-if="samplingLabel" class="ping-chart__meta-pill">{{ samplingLabel }}</span>
-      </div>
-    </div>
-
     <div class="ping-chart__toolbar">
       <div class="ping-chart__range">
         <AppTabs v-model="rangeModel" class="detail-range-tabs" list-label="延迟图时间范围" :items="rangeItems" />
+      </div>
+      <div class="ping-chart__actions">
+        <button type="button" class="ping-chart__button" :class="{ 'is-active': allSelected }" @click="showAll">
+          全选
+        </button>
+        <button type="button" class="ping-chart__button" :class="{ 'is-active': selected.length === 0 }" @click="hideAll">
+          全不选
+        </button>
       </div>
     </div>
 
@@ -321,7 +283,6 @@ function retry(): void {
             tabindex="0"
             :aria-pressed="isSelected(task.target)"
             :data-ping-task="task.target"
-            :style="{ borderColor: isSelected(task.target) ? task.color : undefined }"
             @click="toggleTask(task.target)"
             @keydown.enter.prevent="toggleTask(task.target)"
             @keydown.space.prevent="toggleTask(task.target)"
@@ -370,98 +331,69 @@ function retry(): void {
                 </TooltipProvider>
               </div>
               <div class="ping-task__stats">
-                <span class="ping-task__avg" title="最新延迟">{{ latestText(task) }}</span>
+                <span class="ping-task__avg" title="平均延迟">{{ avgText(task) }}</span>
                 <span class="is-dim">·</span>
                 <span title="丢包率">{{ lossText(task) }}</span>
+                <template v-if="task.stats.ratio !== null">
+                  <span class="is-dim">·</span>
+                  <span title="波动率">{{ task.stats.ratio.toFixed(2) }}</span>
+                </template>
               </div>
             </div>
           </div>
         </div>
 
         <div class="ping-chart__options">
-          <button
-            type="button"
-            class="ping-chart__button"
-            :class="{ 'is-active': showLossBand }"
-            :aria-pressed="showLossBand"
-            @click="showLossBand = !showLossBand"
-          >
-            丢包色带
-          </button>
-          <button
-            type="button"
-            class="ping-chart__button"
-            :class="{ 'is-active': connectNulls }"
-            :aria-pressed="connectNulls"
-            @click="connectNulls = !connectNulls"
-          >
-            断点连线
-          </button>
-          <button
-            type="button"
-            class="ping-chart__button"
-            :class="{ 'is-active': hideSpikes }"
-            :aria-pressed="hideSpikes"
-            data-spike-toggle
-            @click="hideSpikes = !hideSpikes"
-          >
-            隐藏尖峰<template v-if="hideSpikes">
-              · {{ spikeCount }}
-            </template>
-          </button>
-          <button type="button" class="ping-chart__button" :class="{ 'is-active': allSelected }" @click="showAll">
-            全选
-          </button>
-          <button type="button" class="ping-chart__button" :class="{ 'is-active': selected.length === 0 }" @click="hideAll">
-            全不选
-          </button>
-          <button type="button" class="ping-chart__button" :disabled="loading" @click="refresh">
-            {{ loading ? '刷新中' : '刷新' }}
-          </button>
-          <TooltipProvider :delay-duration="0">
-            <TooltipRoot
-              :open="touchMode ? helpOpen : undefined"
-              @update:open="(open: boolean) => (helpOpen = open)"
+          <div class="ping-chart__toggles">
+            <button
+              type="button"
+              class="ping-chart__button"
+              :class="{ 'is-active': hideSpikes }"
+              :aria-pressed="hideSpikes"
+              data-spike-toggle
+              @click="hideSpikes = !hideSpikes"
             >
-              <TooltipTrigger as-child>
-                <button
-                  type="button"
-                  class="ping-task__info"
-                  aria-label="图表显示说明"
-                  data-chart-help
-                  @click="toggleHelp"
-                >
-                  <AppIcon name="carbon:information" :size="14" />
-                </button>
-              </TooltipTrigger>
-              <TooltipPortal>
-                <TooltipContent
-                  class="app-tooltip__bubble ping-chart-help"
-                  side="top"
-                  :side-offset="6"
-                  :collision-padding="8"
-                >
-                  <strong class="ping-chart-help__title">图表显示说明</strong>
-                  <dl class="ping-chart-help__list">
-                    <dt>丢包色带</dt>
-                    <dd>主图上方按线路显示每个采样时段的丢包等级；没有采样的时段留空。</dd>
-                    <dt>断点连线</dt>
-                    <dd>关闭时缺口保持断开；打开后只把折线跨过缺口连起来，不补造采样值。</dd>
-                    <dt>隐藏尖峰</dt>
-                    <dd>仅在图上隐藏识别出的短时高值，隐藏处保留断口；关闭后恢复显示。持续高延迟、阶跃抬升与缓慢爬升照常显示。原始数据和统计结果均不变。</dd>
-                  </dl>
-                  <TooltipArrow class="app-tooltip__arrow" :width="10" :height="5" />
-                </TooltipContent>
-              </TooltipPortal>
-            </TooltipRoot>
-          </TooltipProvider>
+              隐藏尖峰<template v-if="hideSpikes">
+                · {{ spikeCount }}
+              </template>
+            </button>
+            <TooltipProvider :delay-duration="0">
+              <TooltipRoot
+                :open="touchMode ? helpOpen : undefined"
+                @update:open="(open: boolean) => (helpOpen = open)"
+              >
+                <TooltipTrigger as-child>
+                  <button
+                    type="button"
+                    class="ping-task__info"
+                    aria-label="图表显示说明"
+                    data-chart-help
+                    @click="toggleHelp"
+                  >
+                    <AppIcon name="carbon:information" :size="14" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipPortal>
+                  <TooltipContent
+                    class="app-tooltip__bubble ping-chart-help"
+                    side="top"
+                    :side-offset="6"
+                    :collision-padding="8"
+                  >
+                    <strong class="ping-chart-help__title">图表显示说明</strong>
+                    <dl class="ping-chart-help__list">
+                      <dt>隐藏尖峰</dt>
+                      <dd>仅在图上隐藏识别出的短时高值，隐藏处保留断口；关闭后恢复显示。</dd>
+                      <dt>不会隐藏</dt>
+                      <dd>持续高延迟、阶跃抬升与缓慢爬升照常显示。原始数据和统计结果均不变。</dd>
+                    </dl>
+                    <TooltipArrow class="app-tooltip__arrow" :width="10" :height="5" />
+                  </TooltipContent>
+                </TooltipPortal>
+              </TooltipRoot>
+            </TooltipProvider>
+          </div>
         </div>
-
-        <PingLossStrip
-          v-if="showLossBand && selectedTasks.length > 0"
-          :rows="rows"
-          :tasks="selectedTasks"
-        />
 
         <div class="ping-chart__canvas">
           <VChart :option="option" autoresize @legendselectchanged="onLegendSelect" />
@@ -474,128 +406,3 @@ function retry(): void {
     </div>
   </section>
 </template>
-
-<style scoped>
-/* 图 2（LuminaPlus Ping 图表）的标题、元信息、胶囊线路与开关行。 */
-.ping-chart__header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.ping-chart__title {
-  margin: 0;
-  color: var(--ink);
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-
-.ping-chart__meta {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.ping-chart__meta-pill {
-  padding: 4px 10px;
-  border: 1px solid color-mix(in srgb, var(--muted) 16%, transparent);
-  border-radius: 999px;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.3;
-  white-space: nowrap;
-}
-
-.ping-task-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.ping-task {
-  gap: 8px;
-  padding: 6px 12px;
-  border: 1px solid color-mix(in srgb, var(--muted) 20%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--glass) 30%, transparent);
-}
-
-.ping-task:hover {
-  background: color-mix(in srgb, var(--glass) 55%, transparent);
-  box-shadow: none;
-}
-
-.ping-task.is-off {
-  opacity: 0.45;
-}
-
-.ping-task__main {
-  display: flex;
-  min-width: 0;
-  flex: none;
-  align-items: center;
-  gap: 10px;
-}
-
-.ping-task__head {
-  flex: none;
-  gap: 6px;
-}
-
-.ping-task__bar {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-}
-
-.ping-task__name {
-  max-width: 9rem;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.2;
-}
-
-.ping-task__info {
-  width: 20px;
-  height: 20px;
-  margin-left: 2px;
-}
-
-.ping-task__stats {
-  margin-top: 0;
-  gap: 5px;
-  font-size: 11.5px;
-  line-height: 1.2;
-}
-
-.ping-task__avg {
-  font-weight: 650;
-}
-
-.ping-chart__options {
-  justify-content: flex-start;
-  gap: 8px;
-  padding: 10px 0 6px;
-}
-
-.ping-chart__button {
-  border-radius: 999px;
-  padding: 0 12px;
-}
-
-.ping-chart__button.is-active {
-  background: color-mix(in srgb, var(--emerald) 14%, transparent);
-}
-
-@media (max-width: 640px) {
-  .ping-task__main {
-    flex-wrap: wrap;
-    gap: 4px 10px;
-  }
-}
-</style>
