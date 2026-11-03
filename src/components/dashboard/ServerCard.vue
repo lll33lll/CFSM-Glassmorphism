@@ -199,6 +199,7 @@ interface ProbeRow {
   latencyTitle: string
   lossTitle: string
   latencyBars: PingBar[]
+  lossBars: PingBar[]
   lossTone: string
 }
 
@@ -225,6 +226,12 @@ const probeRows = computed<ProbeRow[]>(() => homepageProbes(props.server.latency
       'latency',
       props.server.history.latencySeries,
       latencyToneClass,
+      probe.target,
+    ),
+    lossBars: buildBars(
+      'loss',
+      props.server.history.packetLossSeries,
+      lossToneClass,
       probe.target,
     ),
     lossTone: typeof lossValue === 'number' ? lossToneClass(lossValue).split(' ')[0] ?? '' : '',
@@ -522,24 +529,49 @@ function hideMissingImage(event: Event): void {
       <div v-if="probeRows.length > 0" class="node-probes">
         <div class="node-probe">
           <div class="node-probe__head">
-            <span>延迟 / 丢包</span>
+            <span>延迟</span>
             <span class="node-probe__count">{{ probeRows.length }} 网</span>
           </div>
           <div
             v-for="row in probeRows"
             :key="row.key"
             class="node-probe__row"
-            :title="`${row.latencyTitle}\n${row.lossTitle}`"
+            :title="row.latencyTitle"
           >
-            <span class="node-probe__label">{{ row.label }}</span>
-            <span class="node-probe__value">{{ row.latencyText }}</span>
+            <div class="node-probe__row-head">
+              <span class="node-probe__label">{{ row.label }}</span>
+              <span class="node-probe__value">{{ row.latencyText }}</span>
+            </div>
             <span
               class="node-probe__bars"
               :style="{ gridTemplateColumns: `repeat(${row.latencyBars.length}, minmax(0, 1fr))` }"
             >
               <span v-for="bar in row.latencyBars" :key="bar.key" :class="bar.className" />
             </span>
-            <span class="node-probe__loss" :class="row.lossTone">{{ row.lossText }}</span>
+          </div>
+        </div>
+
+        <div class="node-probe">
+          <div class="node-probe__head">
+            <span>丢包</span>
+            <span class="node-probe__count">{{ probeRows.length }} 网</span>
+          </div>
+          <div
+            v-for="row in probeRows"
+            :key="row.key"
+            class="node-probe__row"
+            :title="row.lossTitle"
+          >
+            <div class="node-probe__row-head">
+              <span class="node-probe__label">{{ row.label }}</span>
+              <span class="node-probe__value" :class="row.lossTone">{{ row.lossText }}</span>
+            </div>
+            <span
+              class="node-probe__bars"
+              :style="{ gridTemplateColumns: `repeat(${row.lossBars.length}, minmax(0, 1fr))` }"
+            >
+              <span v-for="bar in row.lossBars" :key="bar.key" :class="bar.className" />
+            </span>
           </div>
         </div>
       </div>
