@@ -233,7 +233,7 @@ function createEarthMaterial(THREE: ThreeModule): ShaderMaterial {
       uDayMap: { value: loadTexture(THREE, EARTH_DAY_TEXTURE, true) },
       uNightMap: { value: loadTexture(THREE, EARTH_NIGHT_TEXTURE, true) },
       uWaterMap: { value: loadTexture(THREE, EARTH_SPECULAR_MAP, false) },
-      uSunDirection: { value: new THREE.Vector3(-0.34, 0.52, 0.78).normalize() },
+      uSunDirection: { value: new THREE.Vector3(0.62, 0.48, 0.62).normalize() },
       uNightIntensity: { value: 1 },
       uNightAmbient: { value: 0.05 },
       uWaterStrength: { value: 0.55 },
