@@ -5,7 +5,7 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 import AppProgressThin from '@/components/ui/AppProgressThin.vue'
 import type { IconName } from '@/constants/icons'
 import { resolveRegionCoordinates } from '@/domain/advanced-tools'
-import { windowAverage } from '@/domain/probe-window'
+import { homepageProbes, windowAverage } from '@/domain/probe-window'
 import { resolveNodeProvider } from '@/domain/provider'
 import {
   trafficDisplay,
@@ -20,6 +20,7 @@ import {
   formatDisplaySpeed,
   formatLatency,
   formatPercent,
+  formatProbePercent,
   formatUptime,
   MISSING_TEXT,
 } from '@/utils/format'
@@ -140,16 +141,35 @@ function metadataBadges(server: GlassServer): MetadataBadge[] {
   return badges
 }
 
+interface ListProbeRow {
+  key: string
+  label: string
+  latencyText: string
+  lossText: string
+  title: string
+}
+
 /*
- * 与节点卡、上游一致：显示 `/api/servers` 已返回的窗口平均延迟，而不是最近一次采样
- * （上游 `useNodePingDisplay` 的 `latencyDisplay` 取的是 `pingStats.avgLatency`）。
- * 站点关闭三网详情时窗口为空，回落到本次上报的最新值。
+ * 与节点卡、上游一致：显示 `/api/servers` 已返回的窗口平均延迟与丢包，而不是最近一次采样
+ * （上游 `useNodePingDisplay` 的 `latencyDisplay` / `lossDisplay` 取的是
+ * `pingStats.avgLatency` / `avgLoss`）。站点关闭三网详情时窗口为空，回落到本次上报的最新值。
+ *
+ * 列表行高固定 64px，三网用三行小字呈现，仍然保留运行时间那一行。
  */
-function probeText(server: GlassServer): string {
-  const probe = server.latency[0]
-  if (!probe) return MISSING_TEXT
-  const average = windowAverage(server.history.latencySeries, probe.target)
-  return `${probe.label} ${formatLatency(average.value ?? probe.latency)}`
+function probeRows(server: GlassServer): ListProbeRow[] {
+  return homepageProbes(server.latency).map((probe) => {
+    const latency = windowAverage(server.history.latencySeries, probe.target)
+    const loss = windowAverage(server.history.packetLossSeries, probe.target)
+    const latencyValue = latency.value ?? probe.latency
+    const lossValue = loss.value ?? probe.packetLoss
+    return {
+      key: probe.target,
+      label: probe.label,
+      latencyText: formatLatency(latencyValue),
+      lossText: formatProbePercent(lossValue),
+      title: `${probe.label}：延迟 ${formatLatency(latencyValue)}，丢包 ${formatProbePercent(lossValue)}`,
+    }
+  })
 }
 
 /** 与节点卡同一口径（`trafficDisplay`）：关闭流量展示或已用量缺失时不写成「∞」。 */
@@ -298,7 +318,16 @@ function hideMissingImage(event: Event): void {
 
             <div class="node-list__cell">
               <span class="node-list__sub">{{ formatUptime(server.bootTime) }}</span>
-              <span class="node-list__sub">{{ probeText(server) }}</span>
+              <span
+                v-for="row in probeRows(server)"
+                :key="row.key"
+                class="node-list__sub node-list__probe"
+                :title="row.title"
+              >
+                <span class="node-list__probe-label">{{ row.label }}</span>
+                <span>{{ row.latencyText }}</span>
+                <span class="node-list__probe-loss">{{ row.lossText }}</span>
+              </span>
             </div>
 
             <div class="node-list__cell node-list__cell--metric">
