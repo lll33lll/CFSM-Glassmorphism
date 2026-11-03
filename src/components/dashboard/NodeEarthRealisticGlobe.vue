@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { GlobeInstance } from 'globe.gl'
-import type { Mesh, ShaderMaterial, Texture } from 'three'
+import type { ShaderMaterial, Texture } from 'three'
 import {
   useDocumentVisibility,
   useElementSize,
@@ -10,7 +10,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import EARTH_DAY_TEXTURE from '@/assets/earth/earth-blue-marble.jpg'
 import EARTH_NIGHT_TEXTURE from '@/assets/earth/earth-night.jpg'
 import EARTH_SPECULAR_MAP from '@/assets/earth/earth-water.png'
-import EARTH_CLOUDS_TEXTURE from '@/assets/earth/earth-clouds'
 import { useServerGeoClusters } from '@/composables/useServerGeoClusters'
 import { flagUrl } from '@/utils/flags'
 import type { GlassServer } from '@/types/glassmorphism'
@@ -33,16 +32,13 @@ const shouldRender = computed(() => documentVisibility.value === 'visible' && el
 
 let globe: GlobeInstance | null = null
 let globeMaterial: ShaderMaterial | null = null
-let cloudMesh: Mesh | null = null
-let cloudMaterial: ShaderMaterial | null = null
-let cloudFrame: number | null = null
 const loadedTextures: Texture[] = []
 let loadingGlobe = false
 let destroyed = false
 
 /*
  * 贴图地球用「真实昼夜」着色：白天的蓝大理石贴图按太阳方向做漫反射，
- * 夜面用城市灯光贴图，再叠一层真实云层与海面高光。
+ * 夜面用城市灯光贴图，并给海面加镜面高光。
  *
  * 旧实现把整张贴图交给 MeshPhongMaterial，并用 `emissive` 加蓝色底光：
  * 亮色模式下整颗星球被蓝灰色蒙版洗掉，暗色模式下又只剩一张几乎全黑的夜景图。
@@ -99,37 +95,6 @@ void main() {
   color += vec3(0.86, 0.93, 1.0) * specular * uWaterStrength * dayMix;
 
   gl_FragColor = vec4(color, 1.0);
-  #include <colorspace_fragment>
-}
-`
-
-const CLOUD_VERTEX_SHADER = `
-varying vec2 vCloudUv;
-varying vec3 vCloudNormal;
-
-void main() {
-  vCloudUv = uv;
-  vCloudNormal = normalize(mat3(modelMatrix) * normal);
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}
-`
-
-const CLOUD_FRAGMENT_SHADER = `
-uniform sampler2D uCloudMap;
-uniform vec3 uSunDirection;
-uniform float uCloudOpacity;
-uniform float uNightAmbient;
-
-varying vec2 vCloudUv;
-varying vec3 vCloudNormal;
-
-void main() {
-  float alpha = texture2D(uCloudMap, vCloudUv).r * uCloudOpacity;
-  if (alpha < 0.004) discard;
-
-  float sunAmount = clamp(dot(normalize(vCloudNormal), normalize(uSunDirection)), 0.0, 1.0);
-  float light = mix(uNightAmbient, 1.0, sunAmount);
-  gl_FragColor = vec4(vec3(0.55 + 0.65 * light), alpha);
   #include <colorspace_fragment>
 }
 `
@@ -237,9 +202,6 @@ function applyMaterialStyle(): void {
   setUniform(globeMaterial, 'uNightIntensity', props.isDark ? 0.95 : 0.5)
   setUniform(globeMaterial, 'uNightAmbient', props.isDark ? 0.045 : 0.18)
   setUniform(globeMaterial, 'uWaterStrength', props.isDark ? 0.55 : 0.4)
-  setUniform(cloudMaterial, 'uCloudOpacity', props.isDark ? 0.36 : 0.5)
-  setUniform(cloudMaterial, 'uNightAmbient', props.isDark ? 0.04 : 0.2)
-
   globe
     .pointColor(pointColor)
     .ringColor(() => (props.isDark ? 'rgba(45, 212, 191, 0.34)' : 'rgba(14, 165, 233, 0.28)'))
@@ -279,48 +241,6 @@ function createEarthMaterial(THREE: ThreeModule): ShaderMaterial {
     vertexShader: EARTH_VERTEX_SHADER,
     fragmentShader: EARTH_FRAGMENT_SHADER,
   })
-}
-
-function createCloudLayer(THREE: ThreeModule, sunDirection: unknown): { mesh: Mesh, material: ShaderMaterial } {
-  const material = new THREE.ShaderMaterial({
-    uniforms: {
-      uCloudMap: { value: loadTexture(THREE, EARTH_CLOUDS_TEXTURE, false) },
-      uSunDirection: { value: sunDirection },
-      uCloudOpacity: { value: 0.4 },
-      uNightAmbient: { value: 0.05 },
-    },
-    vertexShader: CLOUD_VERTEX_SHADER,
-    fragmentShader: CLOUD_FRAGMENT_SHADER,
-    transparent: true,
-    depthWrite: false,
-    side: THREE.FrontSide,
-  })
-
-  // three-globe 的地球半径为 100，云层略高一点避免与地表共面。
-  const mesh = new THREE.Mesh(new THREE.SphereGeometry(100.45, 64, 64), material)
-  // 与 three-globe 的默认球体保持一致：正对本初子午线，云图才会和地表贴图对齐。
-  mesh.rotation.y = -Math.PI / 2
-  mesh.renderOrder = 1
-  return { mesh, material }
-}
-
-function cloudTick(): void {
-  cloudFrame = null
-  if (!cloudMesh || !shouldRender.value || props.stopped) return
-  // 云层相对地表缓慢西移，速度约为地球自转的十分之一。
-  cloudMesh.rotation.y += 0.00008
-  cloudFrame = requestAnimationFrame(cloudTick)
-}
-
-function startCloudDrift(): void {
-  if (cloudFrame !== null || props.stopped) return
-  cloudFrame = requestAnimationFrame(cloudTick)
-}
-
-function stopCloudDrift(): void {
-  if (cloudFrame === null) return
-  cancelAnimationFrame(cloudFrame)
-  cloudFrame = null
 }
 
 async function startGlobe(): Promise<void> {
@@ -379,11 +299,6 @@ async function startGlobe(): Promise<void> {
     globe.globeMaterial(material)
     globeMaterial = material
 
-    const cloud = createCloudLayer(THREE, material.uniforms.uSunDirection?.value)
-    globe.scene().add(cloud.mesh)
-    cloudMesh = cloud.mesh
-    cloudMaterial = cloud.material
-
     const frontLight = new THREE.DirectionalLight(0xFFFFFF, props.isDark ? 0.9 : 1.0)
     frontLight.position.set(1.2, 1.1, 1.6)
     const leftFill = new THREE.DirectionalLight(0xDBEAFE, props.isDark ? 0.62 : 0.48)
@@ -401,7 +316,6 @@ async function startGlobe(): Promise<void> {
     applyControls()
     resetPointOfView(0)
     if (!shouldRender.value) globe.pauseAnimation()
-    else startCloudDrift()
   } finally {
     loadingGlobe = false
   }
@@ -410,17 +324,11 @@ async function startGlobe(): Promise<void> {
 function stopGlobe(): void {
   if (!globe) return
 
-  stopCloudDrift()
   globe.pauseAnimation()
 
-  if (cloudMesh) globe.scene().remove(cloudMesh)
-  cloudMesh?.geometry.dispose()
-  cloudMaterial?.dispose()
   globeMaterial?.dispose()
   for (const texture of loadedTextures) texture.dispose()
   loadedTextures.length = 0
-  cloudMesh = null
-  cloudMaterial = null
   globeMaterial = null
 
   globe._destructor()
@@ -454,10 +362,7 @@ watch(() => props.stopped, (stopped) => {
   applyControls()
   if (stopped) {
     resetPointOfView(300)
-    stopCloudDrift()
-    return
   }
-  if (shouldRender.value) startCloudDrift()
 })
 
 watch(shouldRender, (visible) => {
@@ -466,12 +371,10 @@ watch(shouldRender, (visible) => {
     globe.resumeAnimation()
     applyControls()
     resizeGlobe()
-    startCloudDrift()
     return
   }
   globe.pauseAnimation()
   applyControls()
-  stopCloudDrift()
 })
 </script>
 
