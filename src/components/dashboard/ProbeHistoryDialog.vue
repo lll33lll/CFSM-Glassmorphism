@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AppDialog from '@/components/ui/AppDialog.vue'
 import type { ProbeHistorySeries } from '@/domain/probe-history'
+import { formatLatency, formatProbePercent } from '@/utils/format'
 
 /**
  * 首页节点卡的「延迟 / 丢包」时间曲线弹窗。
@@ -93,6 +94,7 @@ const chart = computed(() => {
 
   const yTicks = [0, yMax / 2, yMax]
   const xTicks = [xMin, xMin + (xMax - xMin) / 2, xMax]
+  const buckets = [...new Set(timestamps)].sort((a, b) => a - b)
 
   return {
     width: CHART.width,
@@ -104,12 +106,74 @@ const chart = computed(() => {
     yMax,
     yTicks,
     xTicks,
+    buckets,
     xOf,
     yOf,
     lines,
     hasData: values.length > 0,
   }
 })
+
+const hoverIndex = ref<number | null>(null)
+
+watch(() => props.metric, () => {
+  hoverIndex.value = null
+})
+
+const hover = computed(() => {
+  const index = hoverIndex.value
+  const current = chart.value
+  if (index === null || !current.hasData) return null
+  const timestamp = current.buckets[index]
+  if (timestamp === undefined) return null
+
+  const items = props.series.map((item) => {
+    const point = item.points.find((sample) => sample.timestamp === timestamp)
+    const valueText = point === undefined
+      ? '—'
+      : props.metric === 'latency'
+        ? formatLatency(point.value)
+        : formatProbePercent(point.value)
+    const y = point !== undefined && typeof point.value === 'number' && Number.isFinite(point.value)
+      ? current.yOf(point.value)
+      : null
+    return { key: item.key, label: item.label, color: item.color, valueText, y }
+  })
+
+  const x = current.xOf(timestamp)
+  const leftPercent = Math.min(82, Math.max(18, (x / current.width) * 100))
+
+  return {
+    time: formatTime(timestamp),
+    x,
+    items,
+    leftPercent,
+  }
+})
+
+function handlePointerMove(event: PointerEvent): void {
+  const svg = event.currentTarget
+  if (!(svg instanceof SVGElement)) return
+  const current = chart.value
+  if (!current.hasData || current.buckets.length === 0) return
+
+  const rect = svg.getBoundingClientRect()
+  const xInView = ((event.clientX - rect.left) / rect.width) * current.width
+  let nearest = 0
+  let nearestDistance = Number.POSITIVE_INFINITY
+  current.buckets.forEach((timestamp, index) => {
+    const distance = Math.abs(current.xOf(timestamp) - xInView)
+    if (distance < nearestDistance) {
+      nearestDistance = distance
+      nearest = index
+    }
+  })
+  hoverIndex.value = nearest
+}
+
+function clearPointer(): void {
+  hoverIndex.value = null
+}
 </script>
 
 <template>
@@ -133,6 +197,9 @@ const chart = computed(() => {
           :viewBox="`0 0 ${chart.width} ${chart.height}`"
           role="img"
           :aria-label="`${props.serverName} ${metricLabel}时间曲线`"
+          @pointermove="handlePointerMove"
+          @pointerdown="handlePointerMove"
+          @pointerleave="clearPointer"
         >
           <g class="probe-chart__grid">
             <line
@@ -163,7 +230,7 @@ const chart = computed(() => {
             >{{ formatTime(tick) }}</text>
           </g>
 
-          <g v-for="line in chart.lines" :key="line.key">
+          <g v-for="line in chart.lines" :key="line.key" class="probe-chart__series">
             <path
               v-for="(segment, index) in line.segments"
               :key="`${line.key}-${index}`"
@@ -182,7 +249,45 @@ const chart = computed(() => {
               :style="{ fill: line.color }"
             />
           </g>
+
+          <g v-if="hover" class="probe-chart__cursor">
+            <line
+              :x1="hover.x"
+              :x2="hover.x"
+              :y1="chart.top"
+              :y2="chart.height - chart.bottom"
+            />
+            <template v-for="item in hover.items" :key="`active-${item.key}`">
+              <circle
+                v-if="item.y !== null"
+                :cx="hover.x"
+                :cy="item.y"
+                r="3.2"
+                class="probe-chart__point probe-chart__point--active"
+                :style="{ fill: item.color }"
+              />
+            </template>
+          </g>
         </svg>
+
+        <div
+          v-if="hover"
+          class="probe-chart__tooltip"
+          :style="{ left: `${hover.leftPercent}%` }"
+        >
+          <div class="probe-chart__tooltip-time">
+            {{ hover.time }}
+          </div>
+          <div
+            v-for="item in hover.items"
+            :key="item.key"
+            class="probe-chart__tooltip-row"
+          >
+            <i class="probe-chart__dot" :style="{ background: item.color }" aria-hidden="true" />
+            <span>{{ item.label }}</span>
+            <strong>{{ item.valueText }}</strong>
+          </div>
+        </div>
       </div>
 
       <p v-else class="probe-chart__empty">
@@ -201,6 +306,18 @@ const chart = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  animation: probe-chart-enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes probe-chart-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .probe-chart__legend {
@@ -231,6 +348,7 @@ const chart = computed(() => {
 }
 
 .probe-chart__plot-wrap {
+  position: relative;
   border-radius: 10px;
   padding: 8px 4px 2px;
   background: color-mix(in srgb, var(--glass) 45%, transparent);
@@ -240,6 +358,8 @@ const chart = computed(() => {
   display: block;
   width: 100%;
   height: auto;
+  cursor: crosshair;
+  touch-action: pan-y;
 }
 
 .probe-chart__grid line {
@@ -255,14 +375,86 @@ const chart = computed(() => {
 
 .probe-chart__line {
   fill: none;
-  stroke-width: 2;
+  stroke-width: 2.4;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+/* 整条曲线从左往右揭开，避免对折线做 dash 动画时出现虚线。 */
+.probe-chart__series {
+  clip-path: inset(0 100% 0 0);
+  animation: probe-series-reveal 720ms ease-in-out forwards;
+}
+
+@keyframes probe-series-reveal {
+  to {
+    clip-path: inset(0 0 0 0);
+  }
 }
 
 .probe-chart__point {
   stroke: var(--glass);
   stroke-width: 1;
+}
+
+.probe-chart__point--active {
+  opacity: 1;
+  animation: none;
+  stroke: var(--glass);
+  stroke-width: 1.5;
+}
+
+.probe-chart__cursor line {
+  stroke: color-mix(in srgb, var(--ink) 35%, transparent);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.probe-chart__tooltip {
+  position: absolute;
+  top: 8px;
+  z-index: 2;
+  min-width: 116px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--glass) 82%, transparent);
+  box-shadow: 0 10px 26px rgb(15 23 42 / 22%);
+  transform: translateX(-50%);
+  pointer-events: none;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.probe-chart__tooltip-time {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.probe-chart__tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.probe-chart__tooltip-row strong {
+  margin-left: auto;
+  color: var(--ink);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .probe-chart,
+  .probe-chart__series {
+    animation: none;
+    clip-path: none;
+  }
 }
 
 .probe-chart__empty {
