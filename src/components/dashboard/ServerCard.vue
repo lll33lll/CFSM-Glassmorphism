@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { ProbeTarget } from '@/types/cfsm'
 import type { GlassServer } from '@/types/glassmorphism'
 import type { NodeCardSize } from '@/theme/settings'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import AppProgressThin from '@/components/ui/AppProgressThin.vue'
+import ProbeHistoryDialog from '@/components/dashboard/ProbeHistoryDialog.vue'
 import { resolveRegionCoordinates } from '@/domain/advanced-tools'
+import type { ProbeHistorySeries } from '@/domain/probe-history'
 import { homepageProbes, probeSeriesFor, windowAverage, type ProbeSeriesMap } from '@/domain/probe-window'
 import {
   daysUntilExpiry,
@@ -237,6 +239,56 @@ const probeRows = computed<ProbeRow[]>(() => homepageProbes(props.server.latency
     lossTone: typeof lossValue === 'number' ? lossToneClass(lossValue).split(' ')[0] ?? '' : '',
   }
 }))
+
+const activeMetric = ref<'latency' | 'loss' | null>(null)
+
+const historyOpen = computed({
+  get: () => activeMetric.value !== null,
+  set: (open: boolean) => {
+    if (!open) activeMetric.value = null
+  },
+})
+
+/* 三条线路用固定的可区分色，SVG 里直接写 CSS 变量，深浅色主题都能跟着走。 */
+const PROBE_COLORS: Record<string, string> = {
+  ct: 'var(--blue)',
+  cu: 'var(--emerald)',
+  cm: 'var(--amber)',
+  bd: '#a78bfa',
+  node_1: '#60a5fa',
+  node_2: '#34d399',
+  node_3: '#fbbf24',
+  node_4: '#f472b6',
+}
+
+function probeColor(target: ProbeTarget): string {
+  return PROBE_COLORS[target] ?? 'var(--muted)'
+}
+
+const historySeries = computed<ProbeHistorySeries[]>(() => {
+  const metric = activeMetric.value
+  if (!metric) return []
+  const source = metric === 'latency'
+    ? props.server.history.latencySeries
+    : props.server.history.packetLossSeries
+  return probeRows.value.map((row) => ({
+    key: row.key,
+    label: row.label,
+    color: probeColor(row.key),
+    points: probeSeriesFor(source, row.key),
+    valueText: metric === 'latency' ? row.latencyText : row.lossText,
+  }))
+})
+
+function openProbeHistory(metric: 'latency' | 'loss'): void {
+  activeMetric.value = metric
+}
+
+function handleProbeKeydown(event: KeyboardEvent, metric: 'latency' | 'loss'): void {
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  openProbeHistory(metric)
+}
 
 function probeTitle(label: string, metric: string, samples: number): string {
   return samples === 0
@@ -527,10 +579,17 @@ function hideMissingImage(event: Event): void {
       </div>
 
       <div v-if="probeRows.length > 0" class="node-probes">
-        <div class="node-probe">
+        <div
+          class="node-probe node-probe--clickable"
+          role="button"
+          tabindex="0"
+          title="查看延迟时间曲线"
+          @click.stop="openProbeHistory('latency')"
+          @keydown.stop="handleProbeKeydown($event, 'latency')"
+        >
           <div class="node-probe__head">
             <span>延迟</span>
-            <span class="node-probe__count">{{ probeRows.length }} 网</span>
+            <AppIcon name="tabler:chart-line" :size="12" class="node-probe__hint" />
           </div>
           <div
             v-for="row in probeRows"
@@ -551,10 +610,17 @@ function hideMissingImage(event: Event): void {
           </div>
         </div>
 
-        <div class="node-probe">
+        <div
+          class="node-probe node-probe--clickable"
+          role="button"
+          tabindex="0"
+          title="查看丢包时间曲线"
+          @click.stop="openProbeHistory('loss')"
+          @keydown.stop="handleProbeKeydown($event, 'loss')"
+        >
           <div class="node-probe__head">
             <span>丢包</span>
-            <span class="node-probe__count">{{ probeRows.length }} 网</span>
+            <AppIcon name="tabler:chart-line" :size="12" class="node-probe__hint" />
           </div>
           <div
             v-for="row in probeRows"
@@ -585,5 +651,13 @@ function hideMissingImage(event: Event): void {
         <span>{{ offlineText }}</span>
       </div>
     </div>
+
+    <ProbeHistoryDialog
+      v-if="activeMetric"
+      v-model:open="historyOpen"
+      :server-name="server.name"
+      :metric="activeMetric"
+      :series="historySeries"
+    />
   </article>
 </template>
