@@ -4,63 +4,56 @@
  */
 
 /*
- * 首页延迟 / 丢包区照 LuminaPlus 的卡片写法：
- * 两列并排、无面板底色，每列三条线路，行内是「线路 + 数值」，下面一条粗柱带。
+ * 恢复上游的「延迟 / 丢包」两块面板：每块面板里按三网各列一行，
+ * 行内是「线路 + 窗口平均」，下面一条该线路自己的 20 桶柱带。
  */
-.node-probes {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 18px;
-  padding-top: 10px;
-  border-top: 1px solid color-mix(in srgb, var(--muted) 14%, transparent);
+.node-probes .node-probe {
+  padding: 9px 10px;
+  gap: 6px;
 }
 
-.node-probe {
-  gap: 10px;
-  min-height: 0;
-  padding: 0;
-  border-radius: 0;
-  background: transparent;
+.node-card--mini .node-probes .node-probe {
+  padding: 5px 6px;
+  gap: 4px;
 }
 
-.node-card--mini .node-probe {
-  gap: 7px;
-}
-
-/* 整列可点：点开时间曲线，不进入节点详情页。 */
+/* 整块面板可点：点开时间曲线，不进入节点详情页。 */
 .node-probe--clickable {
   cursor: pointer;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
 }
 
-.node-probe--clickable .node-probe__bars {
-  transition: opacity 140ms ease;
+.node-probe--clickable:hover {
+  background: rgb(255 255 255 / 23%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--muted) 12%, transparent);
 }
 
-.node-probe--clickable:hover .node-probe__label {
-  color: var(--ink);
-}
-
-.node-probe--clickable:hover .node-probe__bars {
-  opacity: 1;
+:root[data-theme='dark'] .node-probe--clickable:hover {
+  background: rgb(255 255 255 / 10%);
 }
 
 .node-probe--clickable:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--emerald) 60%, transparent);
-  outline-offset: 3px;
-  border-radius: 4px;
+  outline-offset: 2px;
+}
+
+.node-probe__hint {
+  flex: none;
+  color: var(--muted);
+  opacity: 0.65;
 }
 
 .node-probe__row {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
 .node-probe__row-head {
   display: flex;
   min-width: 0;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 6px;
   font-size: 11px;
@@ -70,29 +63,19 @@
 .node-probe__label {
   overflow: hidden;
   color: var(--muted);
-  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .node-probe__value {
-  flex: none;
   overflow: hidden;
-  font-size: 11.5px;
-  font-weight: 650;
   white-space: nowrap;
 }
 
-/* 图 1 的柱带明显比原来的 5px 高，两列并排时也看得清。 */
+/* 三网面板里的柱带比单线路时矮一点，给三行留出高度。 */
 .node-probe__row .node-probe__bars {
-  height: 12px;
-  min-height: 12px;
-  gap: 2px;
-  opacity: 0.92;
-}
-
-.node-probe__row .node-probe__bars span {
-  border-radius: 2px;
+  height: 6px;
+  min-height: 6px;
 }
 
 .node-probe__value.is-signal-1 { color: var(--signal-1); }
@@ -106,12 +89,12 @@
 }
 
 .node-card--mini .node-probe__row {
-  gap: 3px;
+  gap: 2px;
 }
 
 .node-card--mini .node-probe__row .node-probe__bars {
-  height: 9px;
-  min-height: 9px;
+  height: 4px;
+  min-height: 4px;
 }
 
 /* 列表固定 64px 行高内塞下「运行时间 + 三网三行」。 */
@@ -129,30 +112,4 @@
 .node-list__probe-loss {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
-}
-
-/*
- * 照 LuminaPlus 的手机端：小屏不再让地球压在总览卡下面，
- * 总览卡改为两列排布，卡片本身保持原主题的玻璃表面。
- */
-@media (max-width: 767px) {
-  .general-stage--globe .general-stage__earth {
-    display: none;
-  }
-
-  .general-stage--globe .general-stage__cards {
-    grid-row: auto;
-    margin-top: 0;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-auto-rows: minmax(84px, auto);
-  }
-
-  .general-stage--globe .overview-card:nth-child(n) {
-    grid-column: auto;
-    grid-row: auto;
-  }
-
-  .general-stage--globe .overview-card {
-    min-height: 84px;
-  }
 }
