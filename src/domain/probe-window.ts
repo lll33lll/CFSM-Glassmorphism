@@ -1,5 +1,9 @@
 import type { ProbeTarget } from '@/types/cfsm'
-import type { GlassLatencySample, GlassHistorySummary } from '@/types/glassmorphism'
+import type {
+  GlassHistorySummary,
+  GlassLatencyMetric,
+  GlassLatencySample,
+} from '@/types/glassmorphism'
 
 /*
  * 首页延迟 / 丢包小窗口的读取工具。
@@ -11,6 +15,35 @@ import type { GlassLatencySample, GlassHistorySummary } from '@/types/glassmorph
  */
 
 export type ProbeSeriesMap = Partial<Record<ProbeTarget, GlassLatencySample[]>>
+
+/**
+ * 首页卡片 / 列表同时展示的线路数量上限。
+ *
+ * CFSM 的「三网详情」对应旧四线路里的 ct / cu / cm（电信 / 联通 / 移动）。
+ * 站点只配置了 node_1～node_4 这类自定义探测点时没有三网概念，退回按顺序展示前三个，
+ * 不做任何名称猜测，也不把未配置的线路补成 0。
+ */
+export const HOMEPAGE_PROBE_LIMIT = 3
+
+/** 三网线路的固定顺序：电信 → 联通 → 移动，与运营者后台的顺序无关。 */
+export const HOMEPAGE_TRIPLE_TARGETS: readonly ProbeTarget[] = ['ct', 'cu', 'cm']
+
+/**
+ * 首页要展示的探测目标。
+ *
+ * 有 ct / cu / cm 任意一条时只展示这三条（缺哪条就不显示哪条）；
+ * 一条旧三网线路都没有时，退回 `latency` 里的前三个目标，保证自定义探测点也能看到多线路。
+ */
+export function homepageProbes(
+  probes: readonly GlassLatencyMetric[],
+): GlassLatencyMetric[] {
+  const byTarget = new Map(probes.map((probe) => [probe.target, probe]))
+  const triple = HOMEPAGE_TRIPLE_TARGETS
+    .map((target) => byTarget.get(target))
+    .filter((probe): probe is GlassLatencyMetric => probe !== undefined)
+  if (triple.length > 0) return triple
+  return probes.slice(0, HOMEPAGE_PROBE_LIMIT)
+}
 
 /** 取某个探测目标的窗口序列；该目标没有序列时返回空数组。 */
 export function probeSeriesFor(series: ProbeSeriesMap, target: ProbeTarget): GlassLatencySample[] {

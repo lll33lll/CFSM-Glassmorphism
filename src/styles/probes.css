@@ -1,0 +1,75 @@
+/*
+ * 首页三网延迟 / 丢包面板（ServerCard）与列表三网行（ServerList）。
+ * 放在独立样式文件里，避免改动上游逐字移植的 main.css。
+ */
+
+.node-probes {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.node-probe__row {
+  display: grid;
+  grid-template-columns: 38px 52px minmax(0, 1fr) 46px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.node-probe__label {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-probe__value,
+.node-probe__loss {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.node-probe__loss {
+  color: var(--ink);
+  font-weight: 500;
+  text-align: right;
+}
+
+.node-probe__count {
+  color: color-mix(in srgb, var(--muted) 70%, transparent);
+  font-size: 10px;
+}
+
+.node-probe__loss.is-signal-1 { color: var(--signal-1); }
+.node-probe__loss.is-signal-2 { color: var(--signal-2); }
+.node-probe__loss.is-signal-3 { color: var(--signal-3); }
+.node-probe__loss.is-signal-4 { color: var(--signal-4); }
+.node-probe__loss.is-signal-5 { color: var(--signal-5); }
+
+.node-card--mini .node-probe__row,
+.node-card--mini .node-probe__count {
+  font-size: 10px;
+}
+
+.node-card--mini .node-probe__row {
+  grid-template-columns: 32px 46px minmax(0, 1fr) 40px;
+  gap: 4px;
+}
+
+/* 列表固定 64px 行高内塞下「运行时间 + 三网三行」。 */
+.node-list__probe {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  line-height: 1.25;
+}
+
+.node-list__probe-label {
+  flex: 0 0 auto;
+}
+
+.node-list__probe-loss {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
