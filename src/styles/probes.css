@@ -8,14 +8,46 @@
  * 行内是「线路 + 窗口平均」，下面一条该线路自己的 20 桶柱带。
  */
 .node-probes .node-probe {
+  padding: 9px 10px;
+  gap: 6px;
+}
+
+.node-card--mini .node-probes .node-probe {
+  padding: 5px 6px;
   gap: 4px;
+}
+
+/* 整块面板可点：点开时间曲线，不进入节点详情页。 */
+.node-probe--clickable {
+  cursor: pointer;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.node-probe--clickable:hover {
+  background: rgb(255 255 255 / 23%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--muted) 12%, transparent);
+}
+
+:root[data-theme='dark'] .node-probe--clickable:hover {
+  background: rgb(255 255 255 / 10%);
+}
+
+.node-probe--clickable:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--emerald) 60%, transparent);
+  outline-offset: 2px;
+}
+
+.node-probe__hint {
+  flex: none;
+  color: var(--muted);
+  opacity: 0.65;
 }
 
 .node-probe__row {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .node-probe__row-head {
@@ -40,15 +72,10 @@
   white-space: nowrap;
 }
 
-.node-probe__count {
-  color: color-mix(in srgb, var(--muted) 70%, transparent);
-  font-size: 10px;
-}
-
 /* 三网面板里的柱带比单线路时矮一点，给三行留出高度。 */
 .node-probe__row .node-probe__bars {
-  height: 5px;
-  min-height: 5px;
+  height: 6px;
+  min-height: 6px;
 }
 
 .node-probe__value.is-signal-1 { color: var(--signal-1); }
@@ -57,8 +84,7 @@
 .node-probe__value.is-signal-4 { color: var(--signal-4); }
 .node-probe__value.is-signal-5 { color: var(--signal-5); }
 
-.node-card--mini .node-probe__row-head,
-.node-card--mini .node-probe__count {
+.node-card--mini .node-probe__row-head {
   font-size: 10px;
 }
 
