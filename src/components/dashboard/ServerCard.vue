@@ -202,6 +202,7 @@ interface ProbeRow {
   lossTitle: string
   latencyBars: PingBar[]
   lossBars: PingBar[]
+  latencyTone: string
   lossTone: string
 }
 
@@ -236,6 +237,7 @@ const probeRows = computed<ProbeRow[]>(() => homepageProbes(props.server.latency
       lossToneClass,
       probe.target,
     ),
+    latencyTone: typeof latencyValue === 'number' ? latencyToneClass(latencyValue).split(' ')[0] ?? '' : '',
     lossTone: typeof lossValue === 'number' ? lossToneClass(lossValue).split(' ')[0] ?? '' : '',
   }
 }))
@@ -587,10 +589,6 @@ function hideMissingImage(event: Event): void {
           @click.stop="openProbeHistory('latency')"
           @keydown.stop="handleProbeKeydown($event, 'latency')"
         >
-          <div class="node-probe__head">
-            <span>延迟</span>
-            <AppIcon name="tabler:chart-line" :size="12" class="node-probe__hint" />
-          </div>
           <div
             v-for="row in probeRows"
             :key="row.key"
@@ -599,7 +597,7 @@ function hideMissingImage(event: Event): void {
           >
             <div class="node-probe__row-head">
               <span class="node-probe__label">{{ row.label }}</span>
-              <span class="node-probe__value">{{ row.latencyText }}</span>
+              <span class="node-probe__value" :class="row.latencyTone">{{ row.latencyText }}</span>
             </div>
             <span
               class="node-probe__bars"
@@ -618,10 +616,6 @@ function hideMissingImage(event: Event): void {
           @click.stop="openProbeHistory('loss')"
           @keydown.stop="handleProbeKeydown($event, 'loss')"
         >
-          <div class="node-probe__head">
-            <span>丢包</span>
-            <AppIcon name="tabler:chart-line" :size="12" class="node-probe__hint" />
-          </div>
           <div
             v-for="row in probeRows"
             :key="row.key"
