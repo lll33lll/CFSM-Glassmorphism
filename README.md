@@ -4,6 +4,26 @@
 
 当前稳定版本 **v1.2.0**。
 
+## 本 fork 的使用说明（三网延迟 / 丢包 + 贴图地球）
+
+本仓库是 [allury/CFSM-Glassmorphism](https://github.com/allury/CFSM-Glassmorphism) 的二次修改版，改动集中在首页三网展示与地球配色：
+
+- **首页卡片**：延迟 / 丢包两块面板，面板内三网（电信 / 联通 / 移动）竖排，每条线路一条柱带；点面板直接打开时间曲线弹窗。
+- **列表视图**：每台服务器三行，行内同时给出该线路的延迟与丢包。
+- **地球**：去掉昼夜分界，统一环境光 + 边缘光；默认主题背景改为 CSS 渐变 + 网格与噪点。
+
+在 CFSM 管理端 **主题商店 → 自定义主题 URL** 填入下面地址，再点「应用自定义」：
+
+```text
+https://github.com/lll33lll/CFSM-Glassmorphism/tree/theme-custom
+```
+
+- 源码在 `custom` 分支，构建产物在 `theme-custom` 分支（根目录只有 `index.html` 与 `assets/`）。
+- 分支引用在 Worker 侧缓存约 **1 小时**，重新点「应用自定义」不会清缓存；换成 40 位提交 SHA 则缓存约 **1 天**，适合固定版本：
+  `https://github.com/lll33lll/CFSM-Glassmorphism/tree/c74632d7d2faae70a04040e7b93d01f677cf656a`
+- 前置条件：CFSM 后台开启 **三网详情**（`sysConfig.show_three_net_details`），Worker ≥ 2.8.5（实测版本），Agent 配了 `ct / cu / cm`；关掉三网详情后接口返回空窗口，主题不会用占位数据填充。
+- 想用**上游原版**（没有三网改动）就按下面「使用方法」填 allury 的地址即可，两者互不影响。
+
 ## 预览
 
 **首页 · 浅色**
