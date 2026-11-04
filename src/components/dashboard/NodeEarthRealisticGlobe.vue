@@ -8,7 +8,6 @@ import {
 } from '@vueuse/core'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import EARTH_DAY_TEXTURE from '@/assets/earth/earth-blue-marble.jpg'
-import EARTH_NIGHT_TEXTURE from '@/assets/earth/earth-night.jpg'
 import EARTH_SPECULAR_MAP from '@/assets/earth/earth-water.png'
 import { useServerGeoClusters } from '@/composables/useServerGeoClusters'
 import { flagUrl } from '@/utils/flags'
@@ -37,12 +36,12 @@ let loadingGlobe = false
 let destroyed = false
 
 /*
- * 贴图地球用「真实昼夜」着色：白天的蓝大理石贴图按太阳方向做漫反射，
- * 夜面用城市灯光贴图，并给海面加镜面高光。
+ * 贴图地球不再分白天 / 黑夜：整颗球只有一张白天贴图，阳光只负责很轻的明暗起伏，
+ * 背光面也不会变黑，更不会出现城市灯光。
  *
  * 旧实现把整张贴图交给 MeshPhongMaterial，并用 `emissive` 加蓝色底光：
  * 亮色模式下整颗星球被蓝灰色蒙版洗掉，暗色模式下又只剩一张几乎全黑的夜景图。
- * 这里改为自写着色器，颜色只来自真实贴图与白色阳光，不再给地球整体染色。
+ * 后来改成自写昼夜着色器，亮暗两个半球的对比又太强。现在统一成一套环境光。
  */
 const EARTH_VERTEX_SHADER = `
 varying vec2 vEarthUv;
@@ -59,11 +58,8 @@ void main() {
 
 const EARTH_FRAGMENT_SHADER = `
 uniform sampler2D uDayMap;
-uniform sampler2D uNightMap;
 uniform sampler2D uWaterMap;
 uniform vec3 uSunDirection;
-uniform float uNightIntensity;
-uniform float uNightAmbient;
 uniform float uWaterStrength;
 
 varying vec2 vEarthUv;
@@ -73,26 +69,24 @@ varying vec3 vEarthPosition;
 void main() {
   vec3 normal = normalize(vEarthNormal);
   vec3 sun = normalize(uSunDirection);
-  float sunAmount = dot(normal, sun);
 
-  // 柔和的晨昏线，避免昼夜之间出现硬切边。
-  float dayMix = smoothstep(-0.18, 0.18, sunAmount);
+  vec3 color = texture2D(uDayMap, vEarthUv).rgb;
 
-  vec3 dayColor = texture2D(uDayMap, vEarthUv).rgb;
-  vec3 nightColor = texture2D(uNightMap, vEarthUv).rgb;
-
-  // 白天：白色阳光 + 少量环境光；夜面：城市灯光 + 极弱的地表反照。
-  float diffuse = clamp(sunAmount, 0.0, 1.0);
-  vec3 dayLit = dayColor * (0.42 + 0.68 * diffuse);
-  vec3 nightLit = nightColor * uNightIntensity + dayColor * uNightAmbient;
-  vec3 color = mix(nightLit, dayLit, dayMix);
+  // 不再分白天黑夜：整颗球同处一套环境光下，阳光只负责很轻的明暗起伏，
+  // 背光面也只是稍暗，不会出现半颗黑球和城市灯光。
+  float diffuse = clamp(dot(normal, sun), 0.0, 1.0);
+  color *= 0.72 + 0.40 * diffuse;
 
   // 海面镜面高光：earth-water 白色为海洋，陆地不反光。
   vec3 viewDir = normalize(cameraPosition - vEarthPosition);
   vec3 halfDir = normalize(sun + viewDir);
   float water = texture2D(uWaterMap, vEarthUv).r;
-  float specular = pow(max(dot(normal, halfDir), 0.0), 64.0) * water;
-  color += vec3(0.86, 0.93, 1.0) * specular * uWaterStrength * dayMix;
+  float specular = pow(max(dot(normal, halfDir), 0.0), 52.0) * water;
+  color += vec3(0.92, 0.96, 1.0) * specular * uWaterStrength;
+
+  // 边缘光：给球体一圈很淡的蓝，深色主题下不至于糊成一团黑。
+  float rim = pow(1.0 - clamp(dot(normal, viewDir), 0.0, 1.0), 3.0);
+  color += vec3(0.32, 0.54, 0.86) * rim * 0.32;
 
   gl_FragColor = vec4(color, 1.0);
   #include <colorspace_fragment>
@@ -199,8 +193,6 @@ function setUniform(material: ShaderMaterial | null, name: string, value: number
 function applyMaterialStyle(): void {
   if (!globe) return
 
-  setUniform(globeMaterial, 'uNightIntensity', props.isDark ? 0.95 : 0.5)
-  setUniform(globeMaterial, 'uNightAmbient', props.isDark ? 0.045 : 0.18)
   setUniform(globeMaterial, 'uWaterStrength', props.isDark ? 0.55 : 0.4)
   globe
     .pointColor(pointColor)
@@ -231,11 +223,8 @@ function createEarthMaterial(THREE: ThreeModule): ShaderMaterial {
   return new THREE.ShaderMaterial({
     uniforms: {
       uDayMap: { value: loadTexture(THREE, EARTH_DAY_TEXTURE, true) },
-      uNightMap: { value: loadTexture(THREE, EARTH_NIGHT_TEXTURE, true) },
       uWaterMap: { value: loadTexture(THREE, EARTH_SPECULAR_MAP, false) },
       uSunDirection: { value: new THREE.Vector3(0.62, 0.48, 0.62).normalize() },
-      uNightIntensity: { value: 1 },
-      uNightAmbient: { value: 0.05 },
       uWaterStrength: { value: 0.55 },
     },
     vertexShader: EARTH_VERTEX_SHADER,
