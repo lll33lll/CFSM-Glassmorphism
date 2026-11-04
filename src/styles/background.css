@@ -1,0 +1,68 @@
+/*
+ * 默认背景：不用位图，改成纯 CSS 的多层柔和光晕 + 极轻噪点。
+ *
+ * 原来那张 `default-background-v2.webp` 是青绿到紫的彩虹渐变，颜色比卡片本身还跳，
+ * 玻璃面板压不住它；深色主题下更是被 brightness(0.38) 压成一团浑浊的灰紫。
+ * 这里换成低饱和的冷色底 + 几处很淡的径向光，再用一层几乎看不见的网格与噪点去掉塑料感。
+ */
+
+.dynamic-background__default {
+  background-image:
+    radial-gradient(1600px 900px at 50% -20%, rgb(108 156 232 / 34%) 0%, rgb(108 156 232 / 0%) 68%),
+    radial-gradient(1200px 700px at 96% 4%, rgb(158 128 238 / 24%) 0%, rgb(158 128 238 / 0%) 60%),
+    radial-gradient(1400px 820px at 4% 28%, rgb(64 192 170 / 18%) 0%, rgb(64 192 170 / 0%) 62%),
+    radial-gradient(1200px 700px at 60% 120%, rgb(120 150 220 / 16%) 0%, rgb(120 150 220 / 0%) 62%),
+    linear-gradient(180deg, #fbfdff 0%, #f2f7fd 40%, #e9eff8 100%);
+  background-position: center;
+  background-size: cover;
+  filter: none;
+  transform: none;
+}
+
+:root[data-theme='dark'] .dynamic-background__default {
+  background-image:
+    radial-gradient(1600px 900px at 50% -22%, rgb(64 120 210 / 40%) 0%, rgb(64 120 210 / 0%) 68%),
+    radial-gradient(1200px 720px at 96% 2%, rgb(126 92 226 / 26%) 0%, rgb(126 92 226 / 0%) 60%),
+    radial-gradient(1300px 780px at 4% 22%, rgb(18 132 142 / 22%) 0%, rgb(18 132 142 / 0%) 62%),
+    radial-gradient(1200px 700px at 60% 118%, rgb(46 96 180 / 26%) 0%, rgb(46 96 180 / 0%) 62%),
+    linear-gradient(180deg, #0b1220 0%, #080d17 50%, #070b14 100%);
+  filter: none;
+}
+
+/*
+ * 顶部一层极淡的网格：只在第一屏上半部分可见，往下用遮罩淡出。
+ * 作用是给大色块一点结构感，不然整页就是一片平滑渐变。
+ */
+.dynamic-background__default::before {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, rgb(15 23 42 / 4.5%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(15 23 42 / 4.5%) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(circle at 50% 0%, #000 0%, rgb(0 0 0 / 0%) 68%);
+  -webkit-mask-image: radial-gradient(circle at 50% 0%, #000 0%, rgb(0 0 0 / 0%) 68%);
+  content: '';
+  pointer-events: none;
+}
+
+:root[data-theme='dark'] .dynamic-background__default::before {
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 5%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 5%) 1px, transparent 1px);
+}
+
+/* 噪点：一张 160px 的 SVG 平铺，肉眼几乎看不出，但能消掉大色块的塑料感。 */
+.dynamic-background__default::after {
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.035;
+  mix-blend-mode: soft-light;
+  content: '';
+  pointer-events: none;
+}
+
+:root[data-theme='dark'] .dynamic-background__default::after {
+  opacity: 0.06;
+}

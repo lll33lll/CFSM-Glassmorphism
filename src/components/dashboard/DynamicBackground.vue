@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import defaultBackground from '@/assets/background/default-background-v2.webp'
 import { useBackgroundMedia } from '@/composables/use-background-media'
 import { useThemeSettingsStore } from '@/stores/theme-settings'
 import { resolveBackgroundSource } from '@/theme/settings'
 
 /**
- * Komari Background.vue 的媒体与过渡层。CFSM 特有的只有 Vite 默认图 URL、
- * local: 地址解析、配置返回前的冷启动请求门，以及无 Referer 的图片请求。
+ * Komari Background.vue 的媒体与过渡层。CFSM 特有的只有 local: 地址解析、
+ * 配置返回前的冷启动请求门，以及无 Referer 的图片请求。
+ *
+ * 默认背景已经换成 `styles/background.css` 里的 CSS 渐变，这里不再引用位图。
  */
 const theme = useThemeSettingsStore()
 const showBackground = computed(() => theme.configResolved && theme.runtime.backgroundEnabled)
@@ -54,11 +55,7 @@ const {
     aria-hidden="true"
   >
     <Transition name="fade">
-      <div
-        v-if="showDefaultBackground"
-        class="dynamic-background__default"
-        :style="{ backgroundImage: `url(${defaultBackground})` }"
-      />
+      <div v-if="showDefaultBackground" class="dynamic-background__default" />
     </Transition>
     <Transition name="fade">
       <div v-if="showLoadingBackground" class="dynamic-background__loading" />
