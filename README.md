@@ -20,7 +20,7 @@ https://github.com/lll33lll/CFSM-Glassmorphism/tree/theme-custom
 
 - 源码在 `custom` 分支，构建产物在 `theme-custom` 分支（根目录只有 `index.html` 与 `assets/`）。
 - 分支引用在 Worker 侧缓存约 **1 小时**，重新点「应用自定义」不会清缓存；换成 40 位提交 SHA 则缓存约 **1 天**，适合固定版本：
-  `https://github.com/lll33lll/CFSM-Glassmorphism/tree/c74632d7d2faae70a04040e7b93d01f677cf656a`
+  `https://github.com/lll33lll/CFSM-Glassmorphism/tree/a94c4961e7bfd7c82b600aa0b47ad36c2743060a`
 - 前置条件：CFSM 后台开启 **三网详情**（`sysConfig.show_three_net_details`），Worker ≥ 2.8.5（实测版本），Agent 配了 `ct / cu / cm`；关掉三网详情后接口返回空窗口，主题不会用占位数据填充。
 - 想用**上游原版**（没有三网改动）就按下面「使用方法」填 allury 的地址即可，两者互不影响。
 
