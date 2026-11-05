@@ -140,15 +140,18 @@ export function probeSeriesView(input: ProbeSeriesInput): ProbeSeriesView {
       const bucketStart = windowStart + bucket * bucketMs
       const overlap = Math.min(end, bucketStart + bucketMs) - Math.max(start, bucketStart)
       if (overlap <= 0) continue
-      sums[bucket] += value * overlap
-      coveredMs[bucket] += overlap
+      sums[bucket] = (sums[bucket] ?? 0) + value * overlap
+      coveredMs[bucket] = (coveredMs[bucket] ?? 0) + overlap
     }
   }
 
-  const bars = Array.from({ length: count }, (_, bucket): GlassLatencySample => ({
-    timestamp: windowStart + bucket * bucketMs,
-    value: coveredMs[bucket]! > 0 ? sums[bucket]! / coveredMs[bucket]! : null,
-  }))
+  const bars = Array.from({ length: count }, (_, bucket): GlassLatencySample => {
+    const covered = coveredMs[bucket] ?? 0
+    return {
+      timestamp: windowStart + bucket * bucketMs,
+      value: covered > 0 ? (sums[bucket] ?? 0) / covered : null,
+    }
+  })
 
   return {
     bars,
