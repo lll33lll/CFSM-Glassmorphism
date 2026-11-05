@@ -14,6 +14,7 @@ import {
   resolveQuickControlKeys,
 } from '@/domain/theme-presentation'
 import { probeSeries, visibleLoadCards } from '@/domain/detail-chart-options'
+import { detailExpireStatus, formatDetailExpireText } from '@/utils/format'
 import { EMPTY_RATE_VIEW } from '@/domain/finance'
 import { buildChartRows } from '@/domain/server-detail'
 import { normalizeHistory, normalizeServer } from '@/services/cfsm/adapters'
@@ -88,6 +89,16 @@ describe('round 7 theme presentation contracts', () => {
     expect(daysUntilExpiry(server.expireDate, now)).toBe(10)
     expect(isExpiring(server, 30, now)).toBe(true)
     expect(isHighLoad(server, 80)).toBe(true)
+  })
+
+  it('counts expiry in calendar days so 11/5 to 11/21 is 16 days', () => {
+    const now = new Date(2026, 10, 5, 15, 32).getTime()
+    expect(daysUntilExpiry('2026-11-21', now)).toBe(16)
+    expect(daysUntilExpiry('2026-11-20', now)).toBe(15)
+    expect(daysUntilExpiry('2026-11-05', now)).toBe(0)
+    expect(daysUntilExpiry('2026-11-04', now)).toBe(-1)
+    expect(detailExpireStatus(0)).toBe('today')
+    expect(formatDetailExpireText(0)).toBe('今天到期')
   })
 
   it('keeps expiry summaries strict and computes remaining value only for official CFSM cycles', () => {

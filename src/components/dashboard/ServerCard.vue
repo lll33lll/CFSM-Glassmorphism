@@ -112,7 +112,8 @@ const hasPublicPositivePrice = computed(() => {
 const expiryInfo = computed(() => {
   const days = daysUntilExpiry(props.server.expireDate)
   if (days === null) return { text: MISSING_TEXT, prefix: '', value: '', unit: '', tone: 'neutral' }
-  if (days <= 0) return { text: '已过期', prefix: '', value: '', unit: '', tone: 'danger' }
+  if (days < 0) return { text: '已过期', prefix: '', value: '', unit: '', tone: 'danger' }
+  if (days === 0) return { text: '今天到期', prefix: '', value: '', unit: '', tone: 'danger' }
   if (days > 36_500) return { text: '长期', prefix: '', value: '', unit: '', tone: 'neutral' }
   return {
     text: '',

@@ -106,6 +106,7 @@ function expiryText(row: FinanceRow): string {
   const days = daysUntilExpiry(row.node.expireDate, now.value)
   const status = detailExpireStatus(days)
   if (status === 'expired') return '已过期'
+  if (status === 'today') return '今天到期'
   if (status === 'long_term') return '长期'
   return days === null ? '未设置' : `${days} 天`
 }

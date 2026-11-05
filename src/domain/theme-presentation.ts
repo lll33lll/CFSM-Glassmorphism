@@ -247,13 +247,18 @@ export function isHighLoad(server: GlassServer, threshold: number): boolean {
   return highLoadMetrics(server, threshold).length > 0
 }
 
+/*
+ * 到期天数按自然日差计算，与 CFSM 到期提醒 cron 的 `expireDateSerial - currentDateSerial` 同口径。
+ * CFSM 的 `expire_date` 只存 `YYYY-MM-DD`，不带时刻；到期日当天算 0（今天到期），次日起为负。
+ * 旧实现把纯日期锚到 UTC 正午再向上取整，会让「11/5 看 11/21 到期」显示 17 天而不是 16 天。
+ */
 export function daysUntilExpiry(value: string | null, now = Date.now()): number | null {
   const date = parseCfsmDate(value)
   if (!date) return null
-  const difference = date.getTime() - now
-  return difference <= 0
-    ? Math.floor(difference / 86_400_000)
-    : Math.ceil(difference / 86_400_000)
+  const today = new Date(now)
+  const from = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
+  const to = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+  return Math.round((to - from) / 86_400_000)
 }
 
 /**
@@ -940,7 +945,7 @@ export function buildDetailCards(
     remainingTime: server.expireDate === null ? null : (() => {
       const s = splitMetricValue(formatDetailExpireText(days))
       const status = detailExpireStatus(days)
-      const tone = status === 'expired' || status === 'critical' ? 'danger'
+      const tone = status === 'expired' || status === 'today' || status === 'critical' ? 'danger'
         : status === 'warning' ? 'warning'
           : status === 'long_term' || status === 'unknown' ? 'muted' : 'ok'
       return { ...card('remainingTime', 'tabler:calendar-dollar', '剩余时间', s.value, s.unit), tone }

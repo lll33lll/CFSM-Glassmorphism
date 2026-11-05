@@ -331,23 +331,25 @@ export function formatDetailUptime(bootTime: number | null, now = Date.now()): s
   return parts.length > 0 ? parts.join(' ') : '不足 1 分钟'
 }
 
-export type ExpireStatus = 'unknown' | 'expired' | 'critical' | 'warning' | 'normal' | 'long_term'
+export type ExpireStatus = 'unknown' | 'expired' | 'today' | 'critical' | 'warning' | 'normal' | 'long_term'
 
 /** 阈值取自 Komari `EXPIRE_THRESHOLDS`：5 天内 critical、10 天内 warning、超过 36500 天视为长期。 */
 export function detailExpireStatus(days: number | null): ExpireStatus {
   if (days === null) return 'unknown'
-  if (days <= 0) return 'expired'
+  if (days < 0) return 'expired'
+  if (days === 0) return 'today'
   if (days <= 5) return 'critical'
   if (days <= 10) return 'warning'
   if (days > 36_500) return 'long_term'
   return 'normal'
 }
 
-/** 对应 Komari `getExpireText`：未知 `-`、已过期、长期，否则 `N 天`。 */
+/** 对应 Komari `getExpireText`：未知 `-`、已过期、今天到期、长期，否则 `N 天`。 */
 export function formatDetailExpireText(days: number | null): string {
   switch (detailExpireStatus(days)) {
     case 'unknown': return '-'
     case 'expired': return '已过期'
+    case 'today': return '今天到期'
     case 'long_term': return '长期'
     default: return `${days} 天`
   }
