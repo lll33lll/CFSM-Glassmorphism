@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { ProbeTarget } from '@/types/cfsm'
-import type { GlassServer } from '@/types/glassmorphism'
+import type { GlassLatencySample, GlassServer } from '@/types/glassmorphism'
 import type { NodeCardSize } from '@/theme/settings'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import AppProgressThin from '@/components/ui/AppProgressThin.vue'
 import ProbeHistoryDialog from '@/components/dashboard/ProbeHistoryDialog.vue'
 import { resolveRegionCoordinates } from '@/domain/advanced-tools'
 import type { ProbeHistorySeries } from '@/domain/probe-history'
-import { homepageProbes, probeSeriesFor, windowAverage, type ProbeSeriesMap } from '@/domain/probe-window'
+import { homepageProbes, probeSeriesFor, windowAverage } from '@/domain/probe-window'
 import {
   daysUntilExpiry,
   remainingValue,
@@ -33,6 +33,14 @@ import {
   MISSING_TEXT,
   normalizeTimestampMilliseconds,
 } from '@/utils/format'
+import {
+  PROBE_BAR_ACTIVE_HEIGHT,
+  PROBE_BAR_LATENCY_GAP_HEIGHT,
+  PROBE_EMPTY_COLOR,
+  PROBE_GAP_COLOR,
+  latencyTone,
+  lossTone,
+} from '@/utils/probe-tone'
 import { trafficStatus, trafficTextTone, usageStatus } from '@/utils/progress-status'
 
 /**
@@ -158,39 +166,30 @@ const chips = computed(() => {
 })
 
 /*
- * 延迟与丢包柱状图对齐 Komari `useNodePingDisplay`：
- * 柱子一律满高，数值由 signal-1..5 五级颜色表达，而不是由柱子高度表达；
- * 色觉友好模式再叠加 ping-signal-pattern 纹理。
- * 没有采样时渲染 20 根中性占位柱，与上游 EMPTY_PING_BAR_COUNT 一致，
+ * 延迟与丢包的柱子口径与 volcano-1025/CFSM-Theme-LuminaPlus 完全一致：
+ * 柱子一律 84% 高，严重度只由颜色表达 —— 延迟是五档离散色阶，丢包是连续 HSL 热力渐变
+ * （见 `utils/probe-tone`）。上游 Komari 那套 --signal-1..5 + 纹理不再使用，
+ * 否则同一个 5% 丢包在两个主题里颜色对不上。
+ *
+ * 没有采样时：延迟是 25% 矮柱 + 55% 透明度，丢包是满高但 42% 透明度；
+ * 整段都没有数据时渲染 20 根更淡的占位柱（与上游 EMPTY_PING_BAR_COUNT 一致），
  * 这样丢包为 0 时面板依然是一条完整的柱带，而不是一片空白。
  */
 const EMPTY_PING_BAR_COUNT = 20
 
-function latencyToneClass(latency: number): string {
-  if (latency <= 60) return 'is-signal-1'
-  if (latency <= 100) return 'is-signal-2'
-  if (latency <= 160) return 'is-signal-3 ping-signal-pattern-2'
-  if (latency <= 200) return 'is-signal-4 ping-signal-pattern-3'
-  return 'is-signal-5 ping-signal-pattern-4'
-}
-
-function lossToneClass(loss: number): string {
-  if (loss <= 1) return 'is-signal-1'
-  if (loss <= 3) return 'is-signal-2'
-  if (loss <= 6) return 'is-signal-3 ping-signal-pattern-2'
-  if (loss <= 9) return 'is-signal-4 ping-signal-pattern-3'
-  return 'is-signal-5 ping-signal-pattern-4'
-}
-
 interface PingBar {
   key: string
-  className: string
+  color: string
+  height: string
+  opacity: string
 }
 
 function emptyBars(metric: string): PingBar[] {
   return Array.from({ length: EMPTY_PING_BAR_COUNT }, (_, index) => ({
     key: `${metric}-empty-${index}`,
-    className: 'is-empty',
+    color: PROBE_EMPTY_COLOR,
+    height: PROBE_BAR_ACTIVE_HEIGHT,
+    opacity: '1',
   }))
 }
 
@@ -201,9 +200,10 @@ interface ProbeRow {
   lossText: string
   latencyTitle: string
   lossTitle: string
+  latencyColor: string
+  lossColor: string
   latencyBars: PingBar[]
   lossBars: PingBar[]
-  lossTone: string
 }
 
 /*
@@ -225,19 +225,18 @@ const probeRows = computed<ProbeRow[]>(() => homepageProbes(props.server.latency
     lossText: formatProbePercent(lossValue),
     latencyTitle: probeTitle(probe.label, '平均延迟', latencyWindow.samples),
     lossTitle: probeTitle(probe.label, '平均丢包', lossWindow.samples),
+    latencyColor: typeof latencyValue === 'number' ? latencyTone(latencyValue) : '',
+    lossColor: typeof lossValue === 'number' ? lossTone(lossValue) : '',
     latencyBars: buildBars(
       'latency',
-      props.server.history.latencySeries,
-      latencyToneClass,
-      probe.target,
+      probeSeriesFor(props.server.history.latencySeries, probe.target),
+      latencyTone,
     ),
     lossBars: buildBars(
       'loss',
-      props.server.history.packetLossSeries,
-      lossToneClass,
-      probe.target,
+      probeSeriesFor(props.server.history.packetLossSeries, probe.target),
+      lossTone,
     ),
-    lossTone: typeof lossValue === 'number' ? lossToneClass(lossValue).split(' ')[0] ?? '' : '',
   }
 }))
 
@@ -298,29 +297,35 @@ function probeTitle(label: string, metric: string, samples: number): string {
 }
 
 /*
- * 一根柱子 = 一个时间桶，与 Komari `useNodePingDisplay.buildPingBars` 一致
- * （上游是 `points.map(...)`，逐点渲染）。
- *
- * 柱子只画**当前行所标注的那个探测目标**的序列。此前的实现把
- * 20 个时间桶 × 4 条线路拍平成一个数组，还顺手过滤掉了空洞，
- * 结果既不是时间序列、柱数随缺口变化，柱子与标题上的线路也对不上——
- * 这就是第 14 轮修掉的 BUG-001。
+ * 一根柱子 = 一个时间桶，与 LuminaPlus 的 `healthBarSlotModel` 同口径：
+ * 有值的桶统一 84% 高，颜色只由该桶的绝对值决定；没有采样的桶按两种中性态处理。
  *
  * `null`（该桶无采样）保留为原位的中性柱，对应上游的 `bg-muted-foreground/15`；
- * 整体无数据时才回落到 20 根更淡的占位柱（`bg-muted-foreground/10`）。
+ * 整段无数据时才回落到 20 根更淡的占位柱（`bg-muted-foreground/10`）。
  */
 function buildBars(
   metric: string,
-  series: ProbeSeriesMap,
+  points: readonly GlassLatencySample[],
   tone: (value: number) => string,
-  target: ProbeTarget,
 ): PingBar[] {
-  const points = probeSeriesFor(series, target)
   if (points.length === 0) return emptyBars(metric)
-  return points.map((point, index) => ({
-    key: `${metric}-${point.timestamp}-${index}`,
-    className: typeof point.value === 'number' ? tone(point.value) : 'is-gap',
-  }))
+  return points.map((point, index) => {
+    const key = `${metric}-${point.timestamp}-${index}`
+    if (typeof point.value === 'number') {
+      return {
+        key,
+        color: tone(point.value),
+        height: PROBE_BAR_ACTIVE_HEIGHT,
+        opacity: '0.94',
+      }
+    }
+    return {
+      key,
+      color: PROBE_GAP_COLOR,
+      height: metric === 'latency' ? PROBE_BAR_LATENCY_GAP_HEIGHT : PROBE_BAR_ACTIVE_HEIGHT,
+      opacity: metric === 'latency' ? '0.55' : '0.42',
+    }
+  })
 }
 
 function handleKeydown(event: KeyboardEvent): void {
@@ -600,13 +605,20 @@ function hideMissingImage(event: Event): void {
           >
             <div class="node-probe__row-head">
               <span class="node-probe__label">{{ row.label }}</span>
-              <span class="node-probe__value">{{ row.latencyText }}</span>
+              <span
+                class="node-probe__value"
+                :style="row.latencyColor ? { color: row.latencyColor } : undefined"
+              >{{ row.latencyText }}</span>
             </div>
             <span
               class="node-probe__bars"
               :style="{ gridTemplateColumns: `repeat(${row.latencyBars.length}, minmax(0, 1fr))` }"
             >
-              <span v-for="bar in row.latencyBars" :key="bar.key" :class="bar.className" />
+              <span
+                v-for="bar in row.latencyBars"
+                :key="bar.key"
+                :style="{ background: bar.color, height: bar.height, opacity: bar.opacity }"
+              />
             </span>
           </div>
         </div>
@@ -631,13 +643,20 @@ function hideMissingImage(event: Event): void {
           >
             <div class="node-probe__row-head">
               <span class="node-probe__label">{{ row.label }}</span>
-              <span class="node-probe__value" :class="row.lossTone">{{ row.lossText }}</span>
+              <span
+                class="node-probe__value"
+                :style="row.lossColor ? { color: row.lossColor } : undefined"
+              >{{ row.lossText }}</span>
             </div>
             <span
               class="node-probe__bars"
               :style="{ gridTemplateColumns: `repeat(${row.lossBars.length}, minmax(0, 1fr))` }"
             >
-              <span v-for="bar in row.lossBars" :key="bar.key" :class="bar.className" />
+              <span
+                v-for="bar in row.lossBars"
+                :key="bar.key"
+                :style="{ background: bar.color, height: bar.height, opacity: bar.opacity }"
+              />
             </span>
           </div>
         </div>
