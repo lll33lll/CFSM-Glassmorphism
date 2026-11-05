@@ -8,7 +8,13 @@ import type {
   ServerSourceFailure,
   ServerSystemConfig,
 } from '@/types/cfsm'
-import { fetchAllServerSources, getApiBases, mergeRealtimeSample } from '@/services/cfsm'
+import {
+  fetchAllServerSources,
+  getApiBases,
+  mergeRealtimeSample,
+  probeLiveKey,
+  recordProbeSample,
+} from '@/services/cfsm'
 import type { LoadState } from './app'
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000
@@ -20,6 +26,23 @@ function serverKey(base: string, id: string): string {
 function timestampMilliseconds(value: number | null): number | null {
   if (value === null || !Number.isFinite(value) || value <= 0) return null
   return value < 1_000_000_000_000 ? value * 1000 : value
+}
+
+/**
+ * `/api/servers` 每次刷新也算一次观测：WebSocket 不可用（走 REST 回退轮询）时，
+ * 首页柱子仍有本地真实样本可用，不会退化成只剩后端那 20 个抽样点。
+ */
+function recordLoadedProbes(collections: readonly ServerCollection[], at = Date.now()): void {
+  for (const collection of collections) {
+    for (const server of collection.servers) {
+      recordProbeSample(
+        probeLiveKey(collection.source.base, server.id),
+        at,
+        server.latency,
+        server.packetLoss,
+      )
+    }
+  }
 }
 
 export const useServersStore = defineStore('servers', () => {
@@ -91,10 +114,14 @@ export const useServersStore = defineStore('servers', () => {
         const previous = previousByBase.get(failure.source.base)
         if (previous) refreshedByBase.set(failure.source.base, previous)
       }
-      collections.value = bases.flatMap((base) => {
+      const nextCollections = bases.flatMap((base) => {
         const collection = refreshedByBase.get(base)
         return collection ? [collection] : []
       })
+      // 先记录这一轮快照，再交给视图：视图是按 `CfsmServer` 对象做 WeakMap 缓存的，
+      // 顺序反了的话这一轮会按旧缓冲算好 GlassServer，柱子要等下一轮才更新。
+      recordLoadedProbes(nextCollections)
+      collections.value = nextCollections
       sourceFailures.value = result.failures
       if (result.collections.length > 0) loadedAt.value = Date.now()
 
@@ -154,7 +181,18 @@ export const useServersStore = defineStore('servers', () => {
         const current = updated.get(sample.serverId)
         if (!current) continue
         pendingRealtimeSamples?.push({ key: serverKey(collection.source.base, sample.serverId), sample, receivedAt })
-        updated.set(sample.serverId, mergeRealtimeSample(current, sample, receivedAt))
+        const merged = mergeRealtimeSample(current, sample, receivedAt)
+        updated.set(sample.serverId, merged)
+        /*
+         * 每次都往本地探测缓冲塞一条；重复值由缓冲自己的心跳/防抖规则挡掉，
+         * 所以这里不需要判断这次推送到底变没变。
+         */
+        recordProbeSample(
+          probeLiveKey(collection.source.base, sample.serverId),
+          receivedAt,
+          merged.latency,
+          merged.packetLoss,
+        )
         collectionChanged = true
       }
       if (!collectionChanged) return collection

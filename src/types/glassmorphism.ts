@@ -1,4 +1,4 @@
-import type { ProbeTarget, ProbeValue, ProviderTags, Reachability } from './cfsm'
+import type { ProbeTarget, ProbeValue, ProbeValues, ProviderTags, Reachability } from './cfsm'
 
 export interface GlassResourceMetric {
   used: number | null
@@ -29,6 +29,19 @@ export interface GlassGpuMetric {
 export interface GlassLatencySample {
   timestamp: number
   value: ProbeValue
+}
+
+/**
+ * 浏览器自己攒下来的一次真实探测结果（延迟 + 丢包，八个目标）。
+ *
+ * `/api/servers` 的窗口是「每格取最近一个样本」的抽样，网格锚点跟着请求时间走，
+ * 一次丢包没被抽到就会在下一次刷新里消失（见 `services/cfsm/probe-live.ts`）。
+ * 所以主题另存一份真实样本，首页柱子和窗口合并后再分桶。
+ */
+export interface ProbeLiveValue {
+  time: number
+  latency: ProbeValues
+  loss: ProbeValues
 }
 
 /** 按探测目标分组的窗口序列；每个目标各自是一条等长的时间序列。 */
@@ -96,11 +109,7 @@ export interface GlassServer {
   lastUpdated: number | null
 }
 
-/**
- * 首页视图模式只有卡片与列表两种，与 Komari `appStore.nodeViewMode` 一致。
- * 卡片的密度（mini / compact / comfortable / large）是独立的主题设置
- * `nodeCardSize`，不折叠进视图模式，否则首页控制区会多出上游没有的按钮。
- */
+/** 首页视图模式只有卡片与列表两种，与 Komari `appStore.nodeViewMode` 一致。 */
 export type DashboardViewMode = 'card' | 'list'
 export type DashboardThemeMode = 'system' | 'light' | 'dark'
 export type DashboardSort = 'order' | 'name' | 'status' | 'cpu' | 'memory' | 'network'

@@ -1,16 +1,16 @@
 import type {
   CfsmServer,
-  LatencyWindowSample,
   ProbeTarget,
   ProbeValue,
   SiteConfig,
 } from '@/types/cfsm'
 import { DEFAULT_PROBE_LABELS, PROBE_TARGETS } from '@/constants/probes'
 import type {
-  GlassLatencySample,
   GlassResourceMetric,
   GlassServer,
 } from '@/types/glassmorphism'
+import { buildProbeHistory } from '@/domain/probe-buckets'
+import { getProbeLiveSamples, probeLiveKey } from './probe-live'
 
 function finiteNonNegative(value: number | null): number | null {
   return value !== null && Number.isFinite(value) && value >= 0 ? value : null
@@ -25,27 +25,6 @@ function probeTargetKeys(): readonly ProbeTarget[] {
   return PROBE_TARGETS
 }
 
-/*
- * 把 `/api/servers` 的窗口按探测目标拆成等长时间序列。
- *
- * 每个目标都保留全部时间桶，`null`（无采样）与 `false`（未配置）原样保留：
- * 首页柱状图按桶逐格渲染，过滤掉空洞会让后续柱子前移并造成时间轴错位。
- * 某个目标在整段窗口里都是 `false` 时不产出序列——那表示该探测点没有配置。
- */
-function probeSeries(
-  window: readonly LatencyWindowSample[],
-): Partial<Record<ProbeTarget, GlassLatencySample[]>> {
-  const series: Partial<Record<ProbeTarget, GlassLatencySample[]>> = {}
-  for (const target of PROBE_TARGETS) {
-    const points = window.map((sample) => ({
-      timestamp: sample.timestamp,
-      value: probeMetric(sample[target]),
-    }))
-    if (points.length === 0 || points.every((point) => point.value === false)) continue
-    series[target] = points
-  }
-  return series
-}
 function boundedPercentage(value: number | null): number | null {
   const metric = finiteNonNegative(value)
   return metric === null ? null : Math.min(metric, 100)
@@ -127,10 +106,20 @@ export function toGlassServer(server: CfsmServer, config: SiteConfig | null): Gl
         packetLoss,
       }]
     }),
-    history: {
-      latencySeries: probeSeries(server.latencyWindow),
-      packetLossSeries: probeSeries(server.packetLossWindow),
-    },
+    /*
+     * 历史窗口不再直接照抄 `/api/servers`：后端那 20 个点是对真实记录的**抽样**
+     * （每格取最近的一个样本，网格锚点还跟着请求时间走），一次丢包没被抽中，
+     * 下一次刷新那根柱子就没了。这里把浏览器攒的真实样本和窗口合并后重新分桶，
+     * 见 `domain/probe-buckets`。没有本地样本时行为与改动前一致。
+     */
+    history: buildProbeHistory(
+      {
+        latencyWindow: server.latencyWindow,
+        packetLossWindow: server.packetLossWindow,
+      },
+      getProbeLiveSamples(probeLiveKey(server.source.base, server.id)),
+      Date.now(),
+    ),
     gpus: server.gpus.map((gpu) => ({
       id: gpu.id,
       name: gpu.name,
