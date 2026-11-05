@@ -1,0 +1,47 @@
+name: typecheck-log
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [custom]
+    paths:
+      - '.github/workflows/typecheck-log.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  log:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck and publish report
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          bun run typecheck > /tmp/typecheck.txt 2>&1
+          code=$?
+          {
+            echo "typecheck exit code: ${code}"
+            echo '```'
+            tail -c 60000 /tmp/typecheck.txt
+            echo '```'
+          } > /tmp/report.md
+          mkdir -p .ci
+          cp /tmp/report.md .ci/typecheck.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .ci/typecheck.md
+          git commit -q -m "ci: typecheck report"
+          git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:ci-log
