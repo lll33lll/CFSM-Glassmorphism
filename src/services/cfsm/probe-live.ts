@@ -25,7 +25,9 @@ const MAX_SAMPLES_PER_SERVER = 192
 const MIN_CHANGED_GAP_MS = 5_000
 const HEARTBEAT_GAP_MS = 120_000
 const PERSIST_DEBOUNCE_MS = 15_000
-const STORAGE_KEY = 'cfsm-glassmorphism:probe-live:v1'
+const STORAGE_KEY = 'cfsm-glassmorphism:probe-live:v2'
+const LUMINA_STORAGE_KEY = 'cfsm-luminaplus:ping-live:v1'
+const luminaSeeded = new Set<string>()
 
 const EMPTY: readonly ProbeLiveValue[] = []
 
@@ -70,7 +72,8 @@ function hasAnyValue(sample: ProbeLiveValue): boolean {
 
 function sameValues(left: ProbeLiveValue, right: ProbeLiveValue): boolean {
   return PROBE_TARGETS.every((target) => (
-    left.latency[target] === right.latency[target] && left.loss[target] === right.loss[target]
+    probeNumber(left.latency[target]) === probeNumber(right.latency[target])
+      && probeNumber(left.loss[target]) === probeNumber(right.loss[target])
   ))
 }
 
@@ -137,6 +140,40 @@ function hydrate(): void {
   }
 }
 
+/** Read only: Lumina's own cache is never rewritten or cleared. */
+function seedLuminaSamples(key: string): void {
+  if (luminaSeeded.has(key) || typeof location === 'undefined') return
+  const separator = key.indexOf(':')
+  if (separator < 0) return
+  try {
+    if (decodeURIComponent(key.slice(0, separator)) !== location.origin) return
+  } catch { return }
+  luminaSeeded.add(key)
+  const store = storage()
+  if (!store) return
+  try {
+    const raw = store.getItem(LUMINA_STORAGE_KEY)
+    if (!raw) return
+    const data = JSON.parse(raw) as { nodes?: Record<string, unknown> }
+    const entries = data.nodes?.[key.slice(separator + 1)]
+    if (!Array.isArray(entries)) return
+    const now = Date.now()
+    const byTime = new Map<number, ProbeLiveValue>()
+    for (const sample of samplesByServer.get(key) ?? EMPTY) if (isFresh(sample, now)) byTime.set(sample.time, sample)
+    let added = 0
+    for (const entry of entries) {
+      const sample = fromPersisted(entry)
+      if (!sample || !isFresh(sample, now) || !hasAnyValue(sample)) continue
+      byTime.set(sample.time, sample)
+      added += 1
+    }
+    if (!added) return
+    samplesByServer.set(key, thinSamples([...byTime.values()].sort((a, b) => a.time - b.time)))
+    revisionsByServer.set(key, (revisionsByServer.get(key) ?? 0) + 1)
+    schedulePersist()
+  } catch { /* absent or corrupt external cache: retain backend-window fallback */ }
+}
+
 function persistNow(): void {
   const store = storage()
   if (store === null) return
@@ -151,7 +188,7 @@ function persistNow(): void {
       nodes[key] = fresh.map(toPersisted)
       count += 1
     }
-    store.setItem(STORAGE_KEY, JSON.stringify({ v: 1, savedAt: now, nodes }))
+    store.setItem(STORAGE_KEY, JSON.stringify({ v: 2, savedAt: now, nodes }))
   } catch {
     // 配额用尽或隐私模式：内存里的缓冲区照常工作，只是刷新后要重新累积。
   }
@@ -218,6 +255,7 @@ export function recordProbeSample(
   if (!hasAnyValue(sample)) return
 
   hydrate()
+  seedLuminaSamples(key)
   const previous = samplesByServer.get(key) ?? EMPTY
   const last = previous[previous.length - 1]
   if (last !== undefined) {
@@ -237,6 +275,7 @@ export function recordProbeSample(
 /** 某台节点还在保留期内的样本，按时间升序。没有样本时返回同一个空数组。 */
 export function getProbeLiveSamples(key: string): readonly ProbeLiveValue[] {
   hydrate()
+  seedLuminaSamples(key)
   const samples = samplesByServer.get(key)
   if (samples === undefined) return EMPTY
   const now = Date.now()
@@ -248,6 +287,7 @@ export function getProbeLiveSamples(key: string): readonly ProbeLiveValue[] {
 export function seedMeasuredProbeHistory(key: string, samples: readonly ProbeLiveValue[]): void {
   if (!key || samples.length === 0) return
   hydrate()
+  seedLuminaSamples(key)
   const now = Date.now()
   const byTime = new Map<number, ProbeLiveValue>()
   for (const sample of samplesByServer.get(key) ?? EMPTY) {
@@ -265,5 +305,6 @@ export function seedMeasuredProbeHistory(key: string, samples: readonly ProbeLiv
 /** Cache invalidation when an already-requested detail history fills the local buffer. */
 export function getProbeLiveRevision(key: string): number {
   hydrate()
+  seedLuminaSamples(key)
   return revisionsByServer.get(key) ?? 0
 }

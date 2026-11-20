@@ -24,7 +24,7 @@ export interface ChartRow {
  * 不补点的后果比补空值更糟：类目轴会把离线几小时压成相邻两格，
  * 折线直接跨过空档相连，看起来像这段时间有数据——那才是凭空连出来的线。
  */
-const GAP_FACTOR = 2
+const GAP_FACTOR = 3
 const MAX_GAP_MARKERS = 1500
 
 function median(values: readonly number[]): number | null {
@@ -34,6 +34,15 @@ function median(values: readonly number[]): number | null {
   if (upper === undefined) return null
   const lower = sorted[middle - 1]
   return sorted.length % 2 === 0 && lower !== undefined ? (lower + upper) / 2 : upper
+}
+
+export function resolveChartGapMs(timestamps: readonly number[], minimum = 0): number {
+  const ordered = [...new Set(timestamps)].sort((a, b) => a - b)
+  const gaps = ordered.slice(1).map((time, index) => time - ordered[index]!).filter((gap) => gap > 0).sort((a, b) => a - b)
+  const normal = median(gaps)
+  if (normal === null) return minimum
+  const upper = Math.min(gaps[Math.floor((gaps.length - 1) * 0.9)] ?? normal, normal * 2)
+  return Math.max(normal * GAP_FACTOR, upper * 2, minimum) + 1000
 }
 
 export function buildChartRows(points: readonly HistoryPoint[]): ChartRow[] {
@@ -50,13 +59,14 @@ export function buildChartRows(points: readonly HistoryPoint[]): ChartRow[] {
     .map((sample, index) => sample.timestamp - (samples[index]?.timestamp ?? sample.timestamp))
     .filter((delta) => delta > 0))
   if (interval === null) return samples
+  const gapLimit = resolveChartGapMs(samples.map((sample) => sample.timestamp))
 
   const rows: ChartRow[] = []
   let budget = MAX_GAP_MARKERS
   samples.forEach((sample, index) => {
     const previous = samples[index - 1]
     const gap = previous ? sample.timestamp - previous.timestamp : 0
-    if (previous && gap > interval * GAP_FACTOR) {
+    if (previous && gap > gapLimit) {
       // 预算用完也至少留一个标记：断点必须存在，只是不再按间隔铺满。
       const markers = Math.max(1, Math.min(Math.round(gap / interval) - 1, budget))
       budget = Math.max(0, budget - markers)
@@ -268,10 +278,11 @@ export function buildLiveChartRows(points: readonly HistoryPoint[], gapMs = 60_0
     .filter((point) => Number.isFinite(point.timestamp))
     .sort((left, right) => left.timestamp - right.timestamp)
     .map((point) => ({ timestamp: point.timestamp, point }))
+  const gapLimit = resolveChartGapMs(samples.map((sample) => sample.timestamp), gapMs * 2)
   const rows: ChartRow[] = []
   samples.forEach((sample, index) => {
     const previous = samples[index - 1]
-    if (previous && sample.timestamp - previous.timestamp > gapMs) {
+    if (previous && sample.timestamp - previous.timestamp > gapLimit) {
       rows.push({ timestamp: (previous.timestamp + sample.timestamp) / 2, point: null })
     }
     rows.push(sample)

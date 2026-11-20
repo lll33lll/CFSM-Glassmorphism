@@ -52,8 +52,10 @@ export function mergeDetailLiveSamples(
   let matched = 0
   for (const sample of samples) {
     if (sample.serverId !== current.id) continue
-    current = mergeRealtimeSample(current, sample, receivedAt)
     const timestamp = normalizeTimestampMilliseconds(sample.timestamp) ?? receivedAt
+    const previous = normalizeTimestampMilliseconds(current.lastUpdated ?? current.timestamp) ?? 0
+    if (previous <= receivedAt + 60_000 && timestamp <= previous) continue
+    current = mergeRealtimeSample(current, sample, receivedAt)
     nextPoints = appendLivePoint(nextPoints, liveHistoryPoint(current, timestamp))
     matched += 1
   }

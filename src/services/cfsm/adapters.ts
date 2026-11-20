@@ -424,13 +424,20 @@ export function mergeRealtimeSample(
   receivedAt = Date.now(),
 ): CfsmServer {
   if (server.id !== sample.serverId) return server
+  const sampleTime = numberValue(sample.timestamp)
+  const sampledAt = sampleTime !== null && sampleTime > 0
+    ? (sampleTime < 1_000_000_000_000 ? sampleTime * 1000 : sampleTime) : receivedAt
+  const previousTime = server.lastUpdated ?? server.timestamp
+  const previousAt = previousTime === null ? 0
+    : previousTime < 1_000_000_000_000 ? previousTime * 1000 : previousTime
+  if (sampleTime !== null && previousAt <= receivedAt + 60_000 && sampledAt <= previousAt) return server
   const input = sample.data
   const normalized = normalizeServer({ ...input, id: server.id }, server.source, receivedAt)
   const next: CfsmServer = {
     ...server,
     online: true,
-    lastUpdated: receivedAt,
-    timestamp: sample.timestamp ?? receivedAt,
+    lastUpdated: sampledAt,
+    timestamp: sampledAt,
   }
 
   const name = stringValue(input.name)

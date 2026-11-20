@@ -19,6 +19,18 @@ import type { LoadState } from './app'
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000
 
+function preserveFreshMetrics(snapshot: CfsmServer, previous: CfsmServer | undefined, now: number): CfsmServer {
+  if (!previous) return snapshot
+  const before = timestampMilliseconds(previous.lastUpdated ?? previous.timestamp) ?? 0
+  const after = timestampMilliseconds(snapshot.lastUpdated ?? snapshot.timestamp) ?? 0
+  if (before <= after || before > now + 60_000) return snapshot
+  const fields = ['cpu', 'load1', 'load5', 'load15', 'networkInSpeed', 'networkOutSpeed',
+    'networkReceived', 'networkTransmitted', 'processes', 'tcpConnections', 'udpConnections',
+    'latency', 'packetLoss', 'memoryTotal', 'memoryUsed', 'swapTotal', 'swapUsed',
+    'diskTotal', 'diskUsed', 'diskIo', 'gpus', 'bootTime', 'lastUpdated', 'timestamp'] as const
+  return { ...snapshot, ...Object.fromEntries(fields.map((field) => [field, previous[field]])) }
+}
+
 function serverKey(base: string, id: string): string {
   return base + '::' + id
 }
@@ -106,7 +118,7 @@ export const useServersStore = defineStore('servers', () => {
             const key = serverKey(collection.source.base, refreshed.id)
             return (replayByKey.get(key) ?? []).reduce(
               (current, entry) => mergeRealtimeSample(current, entry.sample, entry.receivedAt),
-              refreshed,
+              preserveFreshMetrics(refreshed, previousByBase.get(collection.source.base)?.servers.find((item) => item.id === refreshed.id), Date.now()),
             )
           }),
         }]),

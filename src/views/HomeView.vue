@@ -54,7 +54,8 @@ const theme = useThemeSettingsStore()
 const finance = useFinanceStore()
 const router = useRouter()
 const glassServerMapper = createGlassServerMapper()
-const probeClock = useTimestamp({ interval: 60_000 })
+const probeClock = useTimestamp({ interval: 1_000 })
+const probeMinute = computed(() => Math.floor(probeClock.value / 60_000) * 60_000)
 const injectedSiteTitle = inject(injectedSiteTitleKey, null)
 const bootstrap = inject(bootstrapKey, null)
 const coldStartCover = bootstrap?.coverVisible ?? ref(false)
@@ -108,7 +109,7 @@ const generalStageClass = computed(() => {
 const metadataFields = computed(() => parseSettingKeys(theme.runtime.nodeListMetadataFields))
 const quickControlKeys = computed(() => resolveQuickControlKeys(theme.runtime))
 const glassServers = computed(() => (
-  glassServerMapper.map(serverStore.servers, app.config, Math.max(probeClock.value, Date.now()))
+  glassServerMapper.map(serverStore.servers, app.config, probeMinute.value)
 ))
 const summary = computed(() => summarizeServers(glassServers.value))
 /*

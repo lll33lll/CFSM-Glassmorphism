@@ -209,7 +209,10 @@ function axisTooltip(
   render: (items: AxisTooltipItem[], point: HistoryPoint) => string,
 ) {
   return (params: unknown): string => {
-    const items = (Array.isArray(params) ? params : [params]) as AxisTooltipItem[]
+    const items = ((Array.isArray(params) ? params : [params]) as AxisTooltipItem[]).map((item) => {
+      const value = (item as { value?: unknown }).value
+      return { ...item, value: finite(Array.isArray(value) ? value[1] : value) }
+    })
     const first = items[0]
     const row = first ? context.rows[first.dataIndex] : undefined
     if (!row) return ''
@@ -408,7 +411,7 @@ export function visibleLoadCards(
 export function cpuChartOption(context: LoadChartContext) {
   const { load, theme, rows } = context
   const y = valueAxis(theme)
-  return {
+  return withTimeAxis(context, {
     animation: false,
     color: [load.primary, load.secondary],
     tooltip: {
@@ -451,7 +454,7 @@ export function cpuChartOption(context: LoadChartContext) {
         yAxisIndex: 1,
       }),
     ],
-  }
+  })
 }
 
 export function memoryChartOption(context: LoadChartContext) {
@@ -485,7 +488,7 @@ export function memoryChartOption(context: LoadChartContext) {
       : []),
   ]
   const y = valueAxis(theme)
-  return {
+  return withTimeAxis(context, {
     animation: false,
     color: [load.primary, load.quinary, load.secondary, load.quaternary],
     tooltip: {
@@ -508,13 +511,13 @@ export function memoryChartOption(context: LoadChartContext) {
       axisLabel: { ...y.axisLabel, formatter: (value: number) => formatChartBytes(value) },
     },
     series,
-  }
+  })
 }
 
 export function diskChartOption(context: LoadChartContext) {
   const { load, theme, rows } = context
   const y = valueAxis(theme)
-  return {
+  return withTimeAxis(context, {
     animation: false,
     color: [load.tertiary, load.quinary],
     tooltip: {
@@ -548,13 +551,13 @@ export function diskChartOption(context: LoadChartContext) {
         dashed: true,
       }),
     ],
-  }
+  })
 }
 
 export function networkChartOption(context: LoadChartContext) {
   const { load, theme, rows } = context
   const y = valueAxis(theme)
-  return {
+  return withTimeAxis(context, {
     animation: false,
     color: [load.quinary, load.quaternary],
     tooltip: {
@@ -575,7 +578,7 @@ export function networkChartOption(context: LoadChartContext) {
       line({ name: '下载', data: rows.map((row) => pick(row, (point) => point.networkInSpeed)), color: load.quinary }),
       line({ name: '上传', data: rows.map((row) => pick(row, (point) => point.networkOutSpeed)), color: load.quaternary }),
     ],
-  }
+  })
 }
 
 export function gpuChartOption(context: LoadChartContext) {
@@ -598,7 +601,7 @@ export function gpuChartOption(context: LoadChartContext) {
     ...deviceSeries,
   ]
   const y = valueAxis(theme)
-  return {
+  return withTimeAxis(context, {
     animation: false,
     color: [load.senary, load.quaternary],
     tooltip: {
@@ -623,7 +626,7 @@ export function gpuChartOption(context: LoadChartContext) {
       axisLabel: { ...y.axisLabel, formatter: '{value}%' },
     },
     series,
-  }
+  })
 }
 
 export function connectionsChartOption(context: LoadChartContext) {
@@ -633,7 +636,7 @@ export function connectionsChartOption(context: LoadChartContext) {
     line({ name: 'UDP', data: rows.map((row) => pick(row, (point) => point.udpConnections)), color: load.tertiary }),
   ].filter((item) => hasValue(item.data))
   const y = valueAxis(theme)
-  return {
+  return withTimeAxis(context, {
     animation: false,
     color: [load.primary, load.tertiary],
     tooltip: {
@@ -652,13 +655,13 @@ export function connectionsChartOption(context: LoadChartContext) {
       axisLabel: { ...y.axisLabel, formatter: (value: number) => Math.round(value).toString() },
     },
     series,
-  }
+  })
 }
 
 export function processChartOption(context: LoadChartContext) {
   const { load, theme, rows } = context
   const y = valueAxis(theme)
-  return {
+  return withTimeAxis(context, {
     animation: false,
     color: [load.quaternary],
     tooltip: {
@@ -684,7 +687,7 @@ export function processChartOption(context: LoadChartContext) {
         area: PROCESS_AREA,
       }),
     ],
-  }
+  })
 }
 
 /**
@@ -694,7 +697,7 @@ export function processChartOption(context: LoadChartContext) {
 export function diskIoChartOption(context: LoadChartContext) {
   const { load, theme, rows } = context
   const y = valueAxis(theme)
-  return {
+  return withTimeAxis(context, {
     animation: false,
     color: [load.tertiary, load.quaternary],
     tooltip: {
@@ -724,7 +727,7 @@ export function diskIoChartOption(context: LoadChartContext) {
       line({ name: '读取', data: rows.map((row) => finite(row.point?.diskIo?.readBps)), color: load.tertiary }),
       line({ name: '写入', data: rows.map((row) => finite(row.point?.diskIo?.writeBps)), color: load.quaternary }),
     ],
-  }
+  })
 }
 
 /* ==================== MetricSeriesChartCard（流量 / Ping / 丢包） ==================== */
@@ -1055,5 +1058,22 @@ export function pingChartOption(context: PingChartContext) {
       splitLine: { lineStyle: { color: theme.splitLineColor, type: 'dashed' as const } },
     },
     series,
+  }
+}
+
+
+/** Preserve actual time spacing without manufacturing intermediate metric samples. */
+function withTimeAxis<T extends { xAxis: ReturnType<typeof categoryAxis>; series: ReturnType<typeof line>[] }>(context: LoadChartContext, option: T) {
+  const { xAxis, series, ...rest } = option
+  return {
+    ...rest,
+    xAxis: {
+      ...xAxis, type: 'time' as const,
+      axisLabel: { ...xAxis.axisLabel, formatter: (value: number) => formatAxisTime(value, context.hours >= 24) },
+    },
+    series: series.map((item) => ({
+      ...item, lineStyle: { ...item.lineStyle, type: 'solid' as const },
+      data: item.data.map((value, index) => [context.rows[index]!.timestamp, value] as [number, Value]),
+    })),
   }
 }
