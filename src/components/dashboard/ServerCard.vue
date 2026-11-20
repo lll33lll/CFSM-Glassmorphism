@@ -5,9 +5,8 @@ import type { GlassLatencySample, GlassServer } from '@/types/glassmorphism'
 import type { NodeCardSize } from '@/theme/settings'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import AppProgressThin from '@/components/ui/AppProgressThin.vue'
-import ProbeHistoryDialog from '@/components/dashboard/ProbeHistoryDialog.vue'
+import ProbeBars from '@/components/dashboard/ProbeBars.vue'
 import { resolveRegionCoordinates } from '@/domain/advanced-tools'
-import type { ProbeHistorySeries } from '@/domain/probe-history'
 import { homepageProbes, probeSeriesFor, windowAverage, latestProbeLatency, homepageLatencyText, homepageLossText } from '@/domain/probe-window'
 import {
   daysUntilExpiry,
@@ -32,10 +31,6 @@ import {
   normalizeTimestampMilliseconds,
 } from '@/utils/format'
 import {
-  PROBE_BAR_ACTIVE_HEIGHT,
-  PROBE_BAR_LATENCY_GAP_HEIGHT,
-  PROBE_EMPTY_COLOR,
-  PROBE_GAP_COLOR,
   latencyTone,
   lossTone,
 } from '@/utils/probe-tone'
@@ -173,24 +168,6 @@ const chips = computed(() => {
  * 整段都没有数据时渲染 20 根更淡的占位柱（与上游 EMPTY_PING_BAR_COUNT 一致），
  * 这样丢包为 0 时面板依然是一条完整的柱带，而不是一片空白。
  */
-const EMPTY_PING_BAR_COUNT = 20
-
-interface PingBar {
-  key: string
-  color: string
-  height: string
-  opacity: string
-}
-
-function emptyBars(metric: string): PingBar[] {
-  return Array.from({ length: EMPTY_PING_BAR_COUNT }, (_, index) => ({
-    key: `${metric}-empty-${index}`,
-    color: PROBE_EMPTY_COLOR,
-    height: metric === 'latency' ? PROBE_BAR_LATENCY_GAP_HEIGHT : PROBE_BAR_ACTIVE_HEIGHT,
-    opacity: metric === 'latency' ? '0.55' : '0.42',
-  }))
-}
-
 interface ProbeRow {
   key: ProbeTarget
   label: string
@@ -200,8 +177,8 @@ interface ProbeRow {
   lossTitle: string
   latencyColor: string
   lossColor: string
-  latencyBars: PingBar[]
-  lossBars: PingBar[]
+  latencyPoints: GlassLatencySample[]
+  lossPoints: GlassLatencySample[]
 }
 
 /*
@@ -224,106 +201,22 @@ const probeRows = computed<ProbeRow[]>(() => homepageProbes(props.server.latency
     lossTitle: probeTitle(probe.label, '平均丢包', lossWindow.samples),
     latencyColor: typeof latencyValue === 'number' ? latencyTone(latencyValue) : '',
     lossColor: typeof lossValue === 'number' ? lossTone(lossValue) : '',
-    latencyBars: buildBars(
-      'latency',
-      probeSeriesFor(props.server.history.latencySeries, probe.target),
-      latencyTone,
-    ),
-    lossBars: buildBars(
-      'loss',
-      probeSeriesFor(props.server.history.packetLossSeries, probe.target),
-      lossTone,
-    ),
+    latencyPoints: probeSeriesFor(props.server.history.latencySeries, probe.target),
+    lossPoints: probeSeriesFor(props.server.history.packetLossSeries, probe.target),
   }
 }))
 
-const activeMetric = ref<'latency' | 'loss' | null>(null)
+const selectedProbe = ref<{ target: ProbeTarget; metric: 'latency' | 'loss'; index: number } | null>(null)
 
-const historyOpen = computed({
-  get: () => activeMetric.value !== null,
-  set: (open: boolean) => {
-    if (!open) activeMetric.value = null
-  },
-})
-
-/* 三条线路用固定的可区分色，SVG 里直接写 CSS 变量，深浅色主题都能跟着走。 */
-const PROBE_COLORS: Record<string, string> = {
-  ct: 'var(--blue)',
-  cu: 'var(--emerald)',
-  cm: 'var(--amber)',
-  bd: '#a78bfa',
-  node_1: '#60a5fa',
-  node_2: '#34d399',
-  node_3: '#fbbf24',
-  node_4: '#f472b6',
-}
-
-function probeColor(target: ProbeTarget): string {
-  return PROBE_COLORS[target] ?? 'var(--muted)'
-}
-
-const historySeries = computed<ProbeHistorySeries[]>(() => {
-  const metric = activeMetric.value
-  if (!metric) return []
-  const source = metric === 'latency'
-    ? props.server.history.latencySeries
-    : props.server.history.packetLossSeries
-  return probeRows.value.map((row) => ({
-    key: row.key,
-    label: row.label,
-    color: probeColor(row.key),
-    points: probeSeriesFor(source, row.key),
-    valueText: metric === 'latency' ? row.latencyText : row.lossText,
-  }))
-})
-
-function openProbeHistory(metric: 'latency' | 'loss'): void {
-  activeMetric.value = metric
-}
-
-function handleProbeKeydown(event: KeyboardEvent, metric: 'latency' | 'loss'): void {
-  if (event.key !== 'Enter' && event.key !== ' ') return
-  event.preventDefault()
-  openProbeHistory(metric)
+function selectProbe(target: ProbeTarget, metric: 'latency' | 'loss', index: number | null): void {
+  if (index !== null) selectedProbe.value = { target, metric, index }
+  else if (selectedProbe.value?.target === target && selectedProbe.value.metric === metric) selectedProbe.value = null
 }
 
 function probeTitle(label: string, metric: string, samples: number): string {
   return samples === 0
     ? `${label} ${metric}：暂无有效采样`
     : `${label} ${metric}：按柱带窗口内的样本时长加权计算`
-}
-
-/*
- * 一根柱子 = 一个时间桶，与 LuminaPlus 的 `healthBarSlotModel` 同口径：
- * 有值的桶统一 84% 高，颜色只由该桶的绝对值决定；没有采样的桶按两种中性态处理。
- *
- * `null`（该桶无采样）保留为原位的中性柱，对应上游的 `bg-muted-foreground/15`；
- * 整段无数据时才回落到 20 根更淡的占位柱（`bg-muted-foreground/10`）。
- */
-function buildBars(
-  metric: string,
-  points: readonly GlassLatencySample[],
-  tone: (value: number) => string,
-): PingBar[] {
-  if (points.length === 0) return emptyBars(metric)
-  return points.map((point, index) => {
-    const key = `${metric}-${index}`
-    if (point.offline) return { key, color: lossTone(100), height: PROBE_BAR_ACTIVE_HEIGHT, opacity: '0.94' }
-    if (typeof point.value === 'number' && Number.isFinite(point.value) && point.value >= 0) {
-      return {
-        key,
-        color: tone(point.value),
-        height: PROBE_BAR_ACTIVE_HEIGHT,
-        opacity: '0.94',
-      }
-    }
-    return {
-      key,
-      color: PROBE_GAP_COLOR,
-      height: metric === 'latency' ? PROBE_BAR_LATENCY_GAP_HEIGHT : PROBE_BAR_ACTIVE_HEIGHT,
-      opacity: metric === 'latency' ? '0.55' : '0.42',
-    }
-  })
 }
 
 function handleKeydown(event: KeyboardEvent): void {
@@ -583,79 +476,44 @@ function hideMissingImage(event: Event): void {
       </div>
 
       <div v-if="probeRows.length > 0" class="node-probes">
-        <div
-          class="node-probe node-probe--clickable"
-          role="button"
-          tabindex="0"
-          title="查看延迟时间曲线"
-          @click.stop="openProbeHistory('latency')"
-          @keydown.stop="handleProbeKeydown($event, 'latency')"
-        >
+        <div class="node-probe" @click.stop @keydown.stop>
           <div class="node-probe__head">
             <span>延迟</span>
-            <AppIcon name="tabler:chart-line" :size="12" class="node-probe__hint" />
+            <span class="node-probe__hint">点柱子查看</span>
           </div>
-          <div
-            v-for="row in probeRows"
-            :key="row.key"
-            class="node-probe__row"
-            :title="row.latencyTitle"
-          >
+          <div v-for="row in probeRows" :key="row.key" class="node-probe__row">
             <div class="node-probe__row-head">
               <span class="node-probe__label">{{ row.label }}</span>
-              <span
-                class="node-probe__value"
-                :style="row.latencyColor ? { color: row.latencyColor } : undefined"
-              >{{ row.latencyText }}</span>
+              <span class="node-probe__value" :title="row.latencyTitle" :style="row.latencyColor ? { color: row.latencyColor } : undefined">{{ row.latencyText }}</span>
             </div>
-            <span
-              class="node-probe__bars"
-              :style="{ gridTemplateColumns: `repeat(${row.latencyBars.length}, minmax(0, 1fr))` }"
-            >
-              <span
-                v-for="bar in row.latencyBars"
-                :key="bar.key"
-                :style="{ background: bar.color, height: bar.height, opacity: bar.opacity }"
-              />
-            </span>
+            <ProbeBars
+              :points="row.latencyPoints"
+              metric="latency"
+              :label="row.label"
+              :mini="isMini"
+              :active-index="selectedProbe?.target === row.key && selectedProbe.metric === 'latency' ? selectedProbe.index : null"
+              @select="selectProbe(row.key, 'latency', $event)"
+            />
           </div>
         </div>
-
-        <div
-          class="node-probe node-probe--clickable"
-          role="button"
-          tabindex="0"
-          title="查看丢包时间曲线"
-          @click.stop="openProbeHistory('loss')"
-          @keydown.stop="handleProbeKeydown($event, 'loss')"
-        >
+        <div class="node-probe" @click.stop @keydown.stop>
           <div class="node-probe__head">
             <span>丢包</span>
-            <AppIcon name="tabler:chart-line" :size="12" class="node-probe__hint" />
+            <span class="node-probe__hint">点柱子查看</span>
           </div>
-          <div
-            v-for="row in probeRows"
-            :key="row.key"
-            class="node-probe__row"
-            :title="row.lossTitle"
-          >
+          <div v-for="row in probeRows" :key="row.key" class="node-probe__row">
             <div class="node-probe__row-head">
               <span class="node-probe__label">{{ row.label }}</span>
-              <span
-                class="node-probe__value"
-                :style="row.lossColor ? { color: row.lossColor } : undefined"
-              >{{ row.lossText }}</span>
+              <span class="node-probe__value" :title="row.lossTitle" :style="row.lossColor ? { color: row.lossColor } : undefined">{{ row.lossText }}</span>
             </div>
-            <span
-              class="node-probe__bars"
-              :style="{ gridTemplateColumns: `repeat(${row.lossBars.length}, minmax(0, 1fr))` }"
-            >
-              <span
-                v-for="bar in row.lossBars"
-                :key="bar.key"
-                :style="{ background: bar.color, height: bar.height, opacity: bar.opacity }"
-              />
-            </span>
+            <ProbeBars
+              :points="row.lossPoints"
+              metric="loss"
+              :label="row.label"
+              :mini="isMini"
+              :active-index="selectedProbe?.target === row.key && selectedProbe.metric === 'loss' ? selectedProbe.index : null"
+              @select="selectProbe(row.key, 'loss', $event)"
+            />
           </div>
         </div>
       </div>
@@ -669,13 +527,5 @@ function hideMissingImage(event: Event): void {
         <span>{{ offlineText }}</span>
       </div>
     </div>
-
-    <ProbeHistoryDialog
-      v-if="activeMetric"
-      v-model:open="historyOpen"
-      :server-name="server.name"
-      :metric="activeMetric"
-      :series="historySeries"
-    />
   </article>
 </template>
