@@ -324,9 +324,9 @@ onBeforeUnmount(() => {
   border-bottom-color: #18181b;
 }
 @media (hover: none), (pointer: coarse) {
-  :global(.node-card:hover) {
-    background: var(--node-card-surface, var(--card-surface));
-    box-shadow: var(--node-card-shadow, var(--card-surface-shadow));
+  :global(.node-card.node-card:hover) {
+    background: var(--node-card-surface, var(--card-surface)) !important;
+    box-shadow: var(--node-card-shadow, var(--card-surface-shadow)) !important;
   }
   :global(.node-card) { -webkit-tap-highlight-color: transparent; }
 }
