@@ -4,27 +4,29 @@
 
 当前稳定版本 **v1.2.0**。
 
-## 本 fork 的使用说明（三网延迟 / 丢包 + 贴图地球）
+## 本 fork 的使用说明
 
-本仓库是 [allury/CFSM-Glassmorphism](https://github.com/allury/CFSM-Glassmorphism) 的二次修改版，改动集中在首页三网展示与地球配色：
-
-- **首页卡片**：延迟 / 丢包两块面板，面板内三网（电信 / 联通 / 移动）竖排，每条线路一条柱带；点面板直接打开时间曲线弹窗。
-- **列表视图**：每台服务器三行，行内同时给出该线路的延迟与丢包。
-- **延迟 / 丢包柱子**：柱子口径与 [CFSM-Theme-LuminaPlus](https://github.com/volcano-1025/CFSM-Theme-LuminaPlus) 一致 —— 20 根柱（一格约 6 分钟，覆盖约 2 小时）；延迟用五档离散色阶，丢包用连续 HSL 热力渐变（绿 → 黄绿 → 黄 → 橙 → 红）；有值的柱子 84% 高，没采样的桶是中性矮柱 / 淡柱。
-- **本地样本缓冲**：主题在浏览器里自己攒每次真实探测（WebSocket 推送，REST 回退时用快照），保留 2 小时 15 分钟（localStorage），再和后端窗口合并后重新分桶。CFSM 的 `/api/servers` 窗口是「每格取最近一个样本」的抽样、网格锚点还跟着请求时间走，一次丢包没被抽中就会在十几分钟内从柱子里消失（`/api/history/all` 里记录还在）；这一层做法与 LuminaPlus 相同，不需要改 CFSM 本体。
-- **地球**：去掉昼夜分界，统一环境光 + 边缘光；默认主题背景改为 CSS 渐变 + 网格与噪点。
-
-在 CFSM 管理端 **主题商店 → 自定义主题 URL** 填入下面地址，再点「应用自定义」：
+- 源码在 `custom`，可安装产物在 `theme-custom`。CFSM 后台 → 主题商店 → 自定义主题 URL：
 
 ```text
 https://github.com/lll33lll/CFSM-Glassmorphism/tree/theme-custom
 ```
 
-- 源码在 `custom` 分支，构建产物在 `theme-custom` 分支（根目录只有 `index.html` 与 `assets/`）。
-- 分支引用在 Worker 侧缓存约 **1 小时**，重新点「应用自定义」不会清缓存；换成 40 位提交 SHA 则缓存约 **1 天**，适合固定版本：
-  `https://github.com/lll33lll/CFSM-Glassmorphism/tree/c40f5f8f062bcb7e6c0f753799abf1014e97ce8b`
-- 前置条件：CFSM 后台开启 **三网详情**（`sysConfig.show_three_net_details`），Worker ≥ 2.8.5（实测版本），Agent 配了 `ct / cu / cm`；关掉三网详情后接口返回空窗口，主题不会用占位数据填充。
-- 想用**上游原版**（没有三网改动）就按下面「使用方法」填 allury 的地址即可，两者互不影响。
+- 固定版本地址见仓库默认 `main` 分支 README。分支引用缓存约 1 小时；建议换用新的完整 SHA 地址，避免旧缓存混用。
+- 保留首页「延迟 / 丢包」两块玻璃面板、三网竖排、20 根柱子和点击打开曲线；列表同样显示三网。
+- **丢包统计已按 LuminaPlus v1.2.24（`391dc27`）适配**：ping/loss 先按时刻配对，本地连续实测优先；15 秒一份的时长权重；按样本覆盖区间投影到桶中点，短事件仍入桶；数字按这 20 根柱子的样本份数加权，不再简单平均 20 个桶，也不回退到单次丢包率。
+- **时间范围**优先读 `/api/config.latency_window.hours`，当前后端为 2 小时；缺席时才按数据跨度自推（30 分钟～2 小时 15 分钟）。缓冲多保留的 15 分钟不混入已声明的 2 小时统计。
+- **延迟数字**取最新成功探测（与 LuminaPlus 当前版一致），柱子显示各桶有效探测加权值；丢包数字保留一位小数。
+- **颜色**：丢包连续 HSL 绿→黄绿→黄→橙→红；有值柱子高 84%、透明度 94%。去掉旧 CSS 额外叠加的 80% 整排透明度；延迟深色高延迟红为 `#f47067`，浅色为 `#dc2626`，缺测用相同的中性底色。
+- **离线**：在最后上报时刻截断真实样本，完全进入离线时段的桶两排都标红；红色离线标记不是人为补出的 100% 测量值，不参与丢包率平均。
+- 只在浏览器保存真实样本（2 小时 15 分钟）；打开详情时复用已经请求的历史回灌，无新增后台轮询或逐节点历史查询。不同浏览器、不同主题的本地历史缓存互相独立，因此刚切换时不保证与另一主题已经累积的柱子逐根一样。
+- 保留当前地球统一环境光、边缘光与 CSS 渐变背景；不改 CFSM 后端、服务器或线上主题设置。
+
+### 本次修复的固定版本
+
+```text
+https://github.com/lll33lll/CFSM-Glassmorphism/tree/30e9551d0eee6a3c36a2ed26aaafb30437c0568a
+```
 
 ## 预览
 
@@ -146,9 +148,9 @@ ASN 可写成 `AS3258`、`asn AS3258` 或 `asn-3258`；组织名前缀与名称�
 
 **延迟和丢包是空的？** 需要在 CFSM 后台开启三网详情，否则接口返回空窗口，主题不会用占位数据填充。
 
-**丢包的柱子过一会儿就没了？** 已修：柱子现在由浏览器累积的真实探测样本 + 后端窗口合并后分桶，本地样本保留 2 小时 15 分钟，丢包事件不会因为后端重新抽样而消失。换浏览器或清掉站点数据后，本地样本从零开始攒，浏览器打开前的时段仍由后端窗口补。
+**柱子和丢包率现在与 LuminaPlus 一样吗？** 统计算法、时间窗口、样本权重和颜色已按 v1.2.24 对齐。不同主题和浏览器的本地缓冲互相独立，刚切换时仍可能因可用样本不同而有差异；丢包数字为柱带窗口加权值，不是最新单次探测。
 
-**柱子为什么有黄色 / 橙色，不是只有红绿？** 丢包用的是连续热力渐变：0% 附近是绿，1% 起偏黄绿，3–5% 转黄，5–10% 转橙，10% 以上才逐步到红，30% 附近全红。延迟是五档：≤60ms 绿、≤100ms 黄绿、≤160ms 偏黄、≤200ms 金、更高红。
+**黄色 / 橙色代表什么？** 丢包使用连续 HSL 渐变，绿→黄绿→黄→橙→红；离线整桶两排均标红，但离线状态标记不作为 100% 测量值混入平均。
 
 **详情页历史最长只有 24 小时？** 未登录访问时 CFSM 限制历史长度，登录后可查看更长区间。
 
@@ -157,7 +159,7 @@ ASN 可写成 `AS3258`、`asn AS3258` 或 `asn-3258`；组织名前缀与名称�
 ## 来源与许可
 
 - 视觉与交互移植自 [sanrokamlan-prog/komari-theme-Glassmorphism](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism)，数据层改写为 CF-Server-Monitor 的公开主题接口。原主题的视觉设计不主张为本项目原创。
-- 延迟 / 丢包色阶（`src/utils/probe-tone.ts`）与首页柱子的取值模型参考 [volcano-1025/CFSM-Theme-LuminaPlus](https://github.com/volcano-1025/CFSM-Theme-LuminaPlus)（MIT），按其 `utils/metricTone.ts` 与 `components/node/nodeCardShared.ts` 的口径实现。
+- 延迟 / 丢包色阶（`src/utils/probe-tone.ts`）与首页柱子的取值模型参考 [volcano-1025/CFSM-Theme-LuminaPlus](https://github.com/volcano-1025/CFSM-Theme-LuminaPlus)（MIT），丢包合并、权重与分桶算法按 v1.2.24（391dc27）移植，核心文件 `src/domain/probe-lumina.ts`，许可见 `LICENSE-LuminaPlus`。
 - 主题接口与协议依据 CF-Server-Monitor 的 `theme-develop.md`。
 - 许可证见 [LICENSE](LICENSE)。
 
