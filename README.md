@@ -25,8 +25,10 @@ https://github.com/lll33lll/CFSM-Glassmorphism/tree/theme-custom
 ### 本次修复的固定版本
 
 ```text
-https://github.com/lll33lll/CFSM-Glassmorphism/tree/dcc5934c5a1b772e314cae23dcc0e421c429198e
+https://github.com/lll33lll/CFSM-Glassmorphism/tree/aedc5419bc2a6ee00083557718e74896d16e2b59
 ```
+
+- **点按状态修复**：取消触屏卡片的悬停闪动；气泡独立渲染，关闭时柱子的缩放、亮度、透明度同步恢复；已去掉「点柱子查看」提示文字。
 
 ## 预览
 
