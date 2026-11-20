@@ -153,6 +153,7 @@ export interface SiteConfig {
   frontendWebsocketTimeoutMinutes: number
   longHistoryPoints: number
   latencyWindow: {
+    declared?: boolean
     points: number
     hours: number
   }

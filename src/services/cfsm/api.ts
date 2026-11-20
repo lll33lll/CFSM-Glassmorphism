@@ -16,6 +16,7 @@ import {
 } from './adapters'
 import { apiSource, getApiBases, STORAGE_KEYS, writeStorage } from './config'
 import { CfsmRequestError, cfsmGet, cfsmPost, type CfsmRequestOptions } from './http'
+import { probeLiveKey, seedMeasuredProbeHistory } from './probe-live'
 import { normalizeServerId } from './identifiers'
 
 export const HISTORY_HOURS = [0.167, 0.5, 1, 6, 12, 24, 48, 96, 168] as const
@@ -171,7 +172,11 @@ export async function fetchHistory(
   const source = apiSource(base)
   const query = new URLSearchParams({ id: serverId, hours: String(hours) }).toString()
   const payload = await cfsmGet('/api/history/all?' + query, { ...options, base })
-  return { serverId, source, points: normalizeHistory(payload) }
+  const points = normalizeHistory(payload)
+  seedMeasuredProbeHistory(probeLiveKey(base, serverId), points.map((point) => ({
+    time: point.timestamp, latency: point.latency, loss: point.packetLoss,
+  })))
+  return { serverId, source, points }
 }
 
 export async function saveThemeOptions(

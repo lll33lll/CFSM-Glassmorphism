@@ -81,17 +81,10 @@ export interface ProbeWindowAverage {
   samples: number
 }
 
-/*
- * 单个探测目标在窗口内的平均值。
- *
- * 对应上游 `useNodePingStats` 的 `avgLatency` / `avgLoss`：Komari 首页卡片显示的是
- * 窗口平均，而不是最近一次采样（`useNodePingDisplay` 的 `latencyDisplay` /
- * `lossDisplay` 都取 stats 的平均值）。上游按每个任务的探测次数加权，CFSM 的
- * `/api/servers` 只返回按时间桶抽样的数值、不返回探测次数，因此落在上游没有
- * metric stats 时的同一形态——对该目标窗口内的真实采样取平均。
- *
- * `null`（该桶无采样）与 `false`（该探测点未配置）都不参与平均：平均值只能由
- * 真实采样构成，把它们当成 0 会把"没数据"说成"零延迟 / 零丢包"。
+/**
+ * Bucket-weighted window statistic. Loss is exactly LuminaPlus lossFromBuckets:
+ * sum(bucket.loss * bucket.total) / sum(bucket.total). Missing and offline-state
+ * buckets are excluded. Legacy series without weights still use one per sample.
  */
 export function windowAverage(series: ProbeSeriesMap, target: ProbeTarget): ProbeWindowAverage {
   let sum = 0
@@ -99,10 +92,32 @@ export function windowAverage(series: ProbeSeriesMap, target: ProbeTarget): Prob
   for (const point of probeSeriesFor(series, target)) {
     const value = point.value
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) continue
-    sum += value
-    samples += 1
+    // Offline red is a state marker, not a fabricated 100% measured loss.
+    if (point.offline) continue
+    const weight = point.weight ?? 1
+    if (!Number.isFinite(weight) || weight <= 0) continue
+    sum += value * weight
+    samples += weight
   }
   return { value: samples === 0 ? null : sum / samples, samples }
+}
+
+/** Latest successful latency (LuminaPlus lastValue + withLiveLatency), not bucket mean. */
+export function latestProbeLatency(
+  history: GlassHistorySummary,
+  target: ProbeTarget,
+  current: number | null | false,
+): number | null {
+  if (typeof current === 'number' && Number.isFinite(current) && current >= 0) return current
+  return history.latencyLatest?.[target] ?? null
+}
+
+/** Homepage missing samples are “—”, not “timeout”; round live latency like LuminaPlus. */
+export function homepageLatencyText(value: number | null): string {
+  return value === null ? '—' : `${Math.round(value)} ms`
+}
+export function homepageLossText(value: number | null): string {
+  return value === null ? '—' : `${value.toFixed(1)}%`
 }
 
 /** 深拷贝窗口序列，用于快照导出。 */
@@ -115,6 +130,7 @@ export function cloneProbeSeries(series: ProbeSeriesMap): ProbeSeriesMap {
 /** 深拷贝整段窗口摘要。 */
 export function cloneHistorySummary(history: GlassHistorySummary): GlassHistorySummary {
   return {
+    latencyLatest: history.latencyLatest ? { ...history.latencyLatest } : undefined,
     latencySeries: cloneProbeSeries(history.latencySeries),
     packetLossSeries: cloneProbeSeries(history.packetLossSeries),
   }

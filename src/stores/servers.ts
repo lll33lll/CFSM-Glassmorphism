@@ -35,9 +35,10 @@ function timestampMilliseconds(value: number | null): number | null {
 function recordLoadedProbes(collections: readonly ServerCollection[], at = Date.now()): void {
   for (const collection of collections) {
     for (const server of collection.servers) {
+      if (!server.online || server.latencyWindow.length > 0) continue
       recordProbeSample(
         probeLiveKey(collection.source.base, server.id),
-        at,
+        timestampMilliseconds(server.lastUpdated ?? server.timestamp) ?? at,
         server.latency,
         server.packetLoss,
       )
@@ -120,7 +121,7 @@ export const useServersStore = defineStore('servers', () => {
       })
       // 先记录这一轮快照，再交给视图：视图是按 `CfsmServer` 对象做 WeakMap 缓存的，
       // 顺序反了的话这一轮会按旧缓冲算好 GlassServer，柱子要等下一轮才更新。
-      recordLoadedProbes(nextCollections)
+      recordLoadedProbes(nextCollections.filter((collection) => !result.failures.some((failure) => failure.source.base === collection.source.base)))
       collections.value = nextCollections
       sourceFailures.value = result.failures
       if (result.collections.length > 0) loadedAt.value = Date.now()
@@ -187,9 +188,9 @@ export const useServersStore = defineStore('servers', () => {
          * 每次都往本地探测缓冲塞一条；重复值由缓冲自己的心跳/防抖规则挡掉，
          * 所以这里不需要判断这次推送到底变没变。
          */
-        recordProbeSample(
+        if (merged.online) recordProbeSample(
           probeLiveKey(collection.source.base, sample.serverId),
-          receivedAt,
+          timestampMilliseconds(merged.lastUpdated ?? merged.timestamp) ?? receivedAt,
           merged.latency,
           merged.packetLoss,
         )

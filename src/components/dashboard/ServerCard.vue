@@ -8,7 +8,7 @@ import AppProgressThin from '@/components/ui/AppProgressThin.vue'
 import ProbeHistoryDialog from '@/components/dashboard/ProbeHistoryDialog.vue'
 import { resolveRegionCoordinates } from '@/domain/advanced-tools'
 import type { ProbeHistorySeries } from '@/domain/probe-history'
-import { homepageProbes, probeSeriesFor, windowAverage } from '@/domain/probe-window'
+import { homepageProbes, probeSeriesFor, windowAverage, latestProbeLatency, homepageLatencyText, homepageLossText } from '@/domain/probe-window'
 import {
   daysUntilExpiry,
   remainingValue,
@@ -26,10 +26,8 @@ import {
   formatDisplayPrice,
   formatDisplaySpeed,
   formatHomeUptimeDays,
-  formatLatency,
   formatLoad,
   formatPercent,
-  formatProbePercent,
   MISSING_TEXT,
   normalizeTimestampMilliseconds,
 } from '@/utils/format'
@@ -188,8 +186,8 @@ function emptyBars(metric: string): PingBar[] {
   return Array.from({ length: EMPTY_PING_BAR_COUNT }, (_, index) => ({
     key: `${metric}-empty-${index}`,
     color: PROBE_EMPTY_COLOR,
-    height: PROBE_BAR_ACTIVE_HEIGHT,
-    opacity: '1',
+    height: metric === 'latency' ? PROBE_BAR_LATENCY_GAP_HEIGHT : PROBE_BAR_ACTIVE_HEIGHT,
+    opacity: metric === 'latency' ? '0.55' : '0.42',
   }))
 }
 
@@ -209,21 +207,20 @@ interface ProbeRow {
 /*
  * 首页同时展示三网（电信 / 联通 / 移动）的延迟与丢包。
  *
- * 数值口径不变：优先取窗口平均（Komari `useNodePingDisplay` 的 avgLatency / avgLoss），
- * 站点关闭三网详情、窗口为空时回落到本次上报的最新值。每条线路各自一条柱带，
+ * 与 LuminaPlus v1.2.24 一致：延迟数字取最新成功探测，丢包数字按柱子的样本权重计算。
+ * 丢包缺测显示 —，不回退到最新一次探测。每条线路各自一条柱带，
  * 柱带只画该线路自己的时间桶，`null` 原位保留为空洞柱。
  */
 const probeRows = computed<ProbeRow[]>(() => homepageProbes(props.server.latency).map((probe) => {
-  const latencyWindow = windowAverage(props.server.history.latencySeries, probe.target)
   const lossWindow = windowAverage(props.server.history.packetLossSeries, probe.target)
-  const latencyValue = latencyWindow.value ?? probe.latency
-  const lossValue = lossWindow.value ?? probe.packetLoss
+  const latencyValue = latestProbeLatency(props.server.history, probe.target, probe.latency)
+  const lossValue = lossWindow.value
   return {
     key: probe.target,
     label: probe.label,
-    latencyText: formatLatency(latencyValue),
-    lossText: formatProbePercent(lossValue),
-    latencyTitle: probeTitle(probe.label, '平均延迟', latencyWindow.samples),
+    latencyText: homepageLatencyText(latencyValue),
+    lossText: homepageLossText(lossValue),
+    latencyTitle: `${probe.label}：最近一次有效延迟`,
     lossTitle: probeTitle(probe.label, '平均丢包', lossWindow.samples),
     latencyColor: typeof latencyValue === 'number' ? latencyTone(latencyValue) : '',
     lossColor: typeof lossValue === 'number' ? lossTone(lossValue) : '',
@@ -292,8 +289,8 @@ function handleProbeKeydown(event: KeyboardEvent, metric: 'latency' | 'loss'): v
 
 function probeTitle(label: string, metric: string, samples: number): string {
   return samples === 0
-    ? `${label} ${metric.replace('平均', '')}：最近一次上报`
-    : `${label} ${metric}：按窗口内 ${samples} 个真实采样计算`
+    ? `${label} ${metric}：暂无有效采样`
+    : `${label} ${metric}：按柱带窗口内的样本时长加权计算`
 }
 
 /*
@@ -310,8 +307,9 @@ function buildBars(
 ): PingBar[] {
   if (points.length === 0) return emptyBars(metric)
   return points.map((point, index) => {
-    const key = `${metric}-${point.timestamp}-${index}`
-    if (typeof point.value === 'number') {
+    const key = `${metric}-${index}`
+    if (point.offline) return { key, color: lossTone(100), height: PROBE_BAR_ACTIVE_HEIGHT, opacity: '0.94' }
+    if (typeof point.value === 'number' && Number.isFinite(point.value) && point.value >= 0) {
       return {
         key,
         color: tone(point.value),

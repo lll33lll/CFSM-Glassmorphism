@@ -9,8 +9,9 @@ import type {
   GlassResourceMetric,
   GlassServer,
 } from '@/types/glassmorphism'
+import { normalizeTimestampMilliseconds } from '@/utils/format'
 import { buildProbeHistory } from '@/domain/probe-buckets'
-import { getProbeLiveSamples, probeLiveKey } from './probe-live'
+import { getProbeLiveSamples, getProbeLiveRevision, probeLiveKey } from './probe-live'
 
 function finiteNonNegative(value: number | null): number | null {
   return value !== null && Number.isFinite(value) && value >= 0 ? value : null
@@ -43,7 +44,7 @@ function serverKey(server: CfsmServer): string {
   return encodeURIComponent(server.source.base) + ':' + server.id
 }
 
-export function toGlassServer(server: CfsmServer, config: SiteConfig | null): GlassServer {
+export function toGlassServer(server: CfsmServer, config: SiteConfig | null, now = Date.now()): GlassServer {
   const labels = config?.probeLabels ?? DEFAULT_PROBE_LABELS
 
   return {
@@ -118,7 +119,11 @@ export function toGlassServer(server: CfsmServer, config: SiteConfig | null): Gl
         packetLossWindow: server.packetLossWindow,
       },
       getProbeLiveSamples(probeLiveKey(server.source.base, server.id)),
-      Date.now(),
+      now,
+      {
+        offlineSince: server.online ? null : normalizeTimestampMilliseconds(server.lastUpdated ?? server.timestamp),
+        windowMs: config?.latencyWindow.declared === true ? config.latencyWindow.hours * 60 * 60 * 1000 : undefined,
+      },
     ),
     gpus: server.gpus.map((gpu) => ({
       id: gpu.id,
@@ -141,19 +146,21 @@ export function toGlassServer(server: CfsmServer, config: SiteConfig | null): Gl
 }
 
 export interface GlassServerMapper {
-  map(servers: readonly CfsmServer[], config: SiteConfig | null): GlassServer[]
+  map(servers: readonly CfsmServer[], config: SiteConfig | null, now?: number): GlassServer[]
 }
 
 export function createGlassServerMapper(): GlassServerMapper {
-  const cache = new WeakMap<CfsmServer, { config: SiteConfig | null, value: GlassServer }>()
+  const cache = new WeakMap<CfsmServer, { config: SiteConfig | null, minute: number, revision: number, value: GlassServer }>()
 
   return {
-    map(servers, config) {
+    map(servers, config, now = Date.now()) {
+      const minute = Math.floor(now / 60_000)
       return servers.map((server) => {
+        const revision = getProbeLiveRevision(probeLiveKey(server.source.base, server.id))
         const cached = cache.get(server)
-        if (cached?.config === config) return cached.value
-        const value = toGlassServer(server, config)
-        cache.set(server, { config, value })
+        if (cached?.config === config && cached.minute === minute && cached.revision === revision) return cached.value
+        const value = toGlassServer(server, config, now)
+        cache.set(server, { config, minute, revision, value })
         return value
       })
     },

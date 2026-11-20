@@ -258,6 +258,7 @@ export function normalizeSiteConfig(value: unknown): SiteConfig {
     frontendWebsocketTimeoutMinutes: liveSocketTimeoutMinutes(input.frontend_ws_timeout_minutes),
     longHistoryPoints: numberValue(input.long_history_points) ?? 120,
     latencyWindow: {
+      declared: typeof latencyConfig.hours === 'number' && Number.isFinite(latencyConfig.hours) && latencyConfig.hours > 0,
       points: numberValue(latencyConfig.points) ?? 20,
       hours: numberValue(latencyConfig.hours) ?? 2,
     },

@@ -21,9 +21,9 @@ function hsl(hue: number, saturation: number, lightness: number): string {
 /** 没有任何真实采样时的中性色。 */
 export const PROBE_NEUTRAL_COLOR = 'var(--muted)'
 /** 序列中间某个时间桶没有采样时的空洞色。 */
-export const PROBE_GAP_COLOR = 'color-mix(in srgb, var(--muted) 15%, transparent)'
+export const PROBE_GAP_COLOR = 'var(--probe-progress-bg)'
 /** 整段都没有数据时的占位色。 */
-export const PROBE_EMPTY_COLOR = 'color-mix(in srgb, var(--muted) 10%, transparent)'
+export const PROBE_EMPTY_COLOR = 'var(--probe-progress-bg)'
 
 /** 与 LuminaPlus 的 `HEALTH_LOSS_BAR_HEIGHT` 一致：所有有值的柱子都是 84% 高。 */
 export const PROBE_BAR_ACTIVE_HEIGHT = '84%'
@@ -36,7 +36,7 @@ export function latencyTone(ms: number | null | undefined): string {
   if (ms <= 100) return '#9fe339'
   if (ms <= 160) return '#cbd83a'
   if (ms <= 200) return '#e2a928'
-  return '#dc2626'
+  return 'var(--probe-latency-critical)'
 }
 
 type HeatSegment = (t: number) => string

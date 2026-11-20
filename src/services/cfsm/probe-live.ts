@@ -21,7 +21,7 @@ import type { ProbeLiveValue } from '@/types/glassmorphism'
 
 /** 与后端窗口跨度对齐：2 小时 + 15 分钟余量。 */
 const SAMPLE_TTL_MS = 2 * 60 * 60 * 1000 + 15 * 60 * 1000
-const MAX_SAMPLES_PER_SERVER = 320
+const MAX_SAMPLES_PER_SERVER = 192
 const MIN_CHANGED_GAP_MS = 5_000
 const HEARTBEAT_GAP_MS = 120_000
 const PERSIST_DEBOUNCE_MS = 15_000
@@ -33,6 +33,7 @@ const EMPTY: readonly ProbeLiveValue[] = []
 type PersistedSample = Array<number | null>
 
 const samplesByServer = new Map<string, readonly ProbeLiveValue[]>()
+const revisionsByServer = new Map<string, number>()
 let hydrated = false
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -176,17 +177,31 @@ if (typeof window !== 'undefined') {
 
 /** 超出条数上限时按时间均匀抽稀，先保新的、再保整段跨度。 */
 function thinSamples(samples: readonly ProbeLiveValue[]): ProbeLiveValue[] {
-  if (samples.length <= MAX_SAMPLES_PER_SERVER) return [...samples]
-  const minGap = SAMPLE_TTL_MS / MAX_SAMPLES_PER_SERVER
-  const kept: ProbeLiveValue[] = []
+  if (samples.length <= MAX_SAMPLES_PER_SERVER) return [...samples];
+
+  const kept: ProbeLiveValue[] = [];
   for (let index = samples.length - 1; index >= 0; index -= 1) {
-    const sample = samples[index]!
-    const last = kept[kept.length - 1]
-    if (last === undefined || last.time - sample.time >= minGap) kept.push(sample)
+    const sample = samples[index]!;
+    const last = kept[kept.length - 1];
+    if (!last || last.time - sample.time >= (2 * 60 * 60 * 1000 / MAX_SAMPLES_PER_SERVER)) kept.push(sample);
   }
-  kept.reverse()
-  return kept
+  kept.reverse();
+  if (kept.length <= MAX_SAMPLES_PER_SERVER) return kept;
+
+  // 还超上限就加大间隔再抽一轮。这里**不能** `slice(-N)` —— 那会整段砍掉最老的，
+  // 而最老的那半段往往正是后端窗口独有、本地没覆盖到的部分，砍掉柱子就左半段空。
+  const span = kept[kept.length - 1]!.time - kept[0]!.time;
+  const gap = Math.max((2 * 60 * 60 * 1000 / MAX_SAMPLES_PER_SERVER), span / MAX_SAMPLES_PER_SERVER);
+  const sparse: ProbeLiveValue[] = [];
+  for (let index = kept.length - 1; index >= 0; index -= 1) {
+    const sample = kept[index]!;
+    const last = sparse[sparse.length - 1];
+    if (!last || last.time - sample.time >= gap) sparse.push(sample);
+  }
+  sparse.reverse();
+  return sparse;
 }
+
 
 /**
  * 记一次真实探测。调用方可以每个 WS 帧都调：重复值会被心跳间隔挡住，
@@ -215,6 +230,7 @@ export function recordProbeSample(
   const now = Date.now()
   const next = thinSamples([...previous.filter((item) => isFresh(item, now)), sample])
   samplesByServer.set(key, next)
+  revisionsByServer.set(key, (revisionsByServer.get(key) ?? 0) + 1)
   schedulePersist()
 }
 
@@ -226,4 +242,28 @@ export function getProbeLiveSamples(key: string): readonly ProbeLiveValue[] {
   const now = Date.now()
   const fresh = samples.filter((sample) => isFresh(sample, now))
   return fresh.length === 0 ? EMPTY : fresh
+}
+
+/** Reuse a user-requested history response, just as LuminaPlus does; no additional fetch. */
+export function seedMeasuredProbeHistory(key: string, samples: readonly ProbeLiveValue[]): void {
+  if (!key || samples.length === 0) return
+  hydrate()
+  const now = Date.now()
+  const byTime = new Map<number, ProbeLiveValue>()
+  for (const sample of samplesByServer.get(key) ?? EMPTY) {
+    if (isFresh(sample, now)) byTime.set(sample.time, sample)
+  }
+  for (const sample of samples) {
+    if (!isFresh(sample, now) || sample.time > now || !hasAnyValue(sample)) continue
+    byTime.set(sample.time, sample)
+  }
+  samplesByServer.set(key, thinSamples([...byTime.values()].sort((a, b) => a.time - b.time)))
+  revisionsByServer.set(key, (revisionsByServer.get(key) ?? 0) + 1)
+  schedulePersist()
+}
+
+/** Cache invalidation when an already-requested detail history fills the local buffer. */
+export function getProbeLiveRevision(key: string): number {
+  hydrate()
+  return revisionsByServer.get(key) ?? 0
 }

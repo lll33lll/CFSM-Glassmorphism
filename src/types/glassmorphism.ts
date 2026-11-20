@@ -29,6 +29,11 @@ export interface GlassGpuMetric {
 export interface GlassLatencySample {
   timestamp: number
   value: ProbeValue
+  /** LuminaPlus bucket sample weight; loss averages must retain it. */
+  weight?: number
+  /** Entire bucket follows the last report of an offline node; paint red, not 0%. */
+  offline?: boolean
+  endTimestamp?: number
 }
 
 /**
@@ -46,6 +51,7 @@ export interface ProbeLiveValue {
 
 /** 按探测目标分组的窗口序列；每个目标各自是一条等长的时间序列。 */
 export interface GlassHistorySummary {
+  latencyLatest?: Partial<Record<ProbeTarget, number>>
   latencySeries: Partial<Record<ProbeTarget, GlassLatencySample[]>>
   packetLossSeries: Partial<Record<ProbeTarget, GlassLatencySample[]>>
 }

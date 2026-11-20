@@ -5,6 +5,7 @@ import { router } from './router'
 import './styles/main.css'
 import './styles/background.css'
 import './styles/probes.css'
+import './styles/probe-lumina.css'
 
 createApp(App)
   .use(createPinia())

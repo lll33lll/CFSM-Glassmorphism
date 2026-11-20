@@ -1,0 +1,16 @@
+/* Probe palette and bar alpha match LuminaPlus v1.2.24, independent of glass presets. */
+:root {
+  --probe-latency-critical: #dc2626;
+  --probe-progress-bg: #e4e4e7;
+}
+:root[data-theme='dark'] {
+  --probe-latency-critical: #f47067;
+  --probe-progress-bg: #343b45;
+}
+.node-probe__bars {
+  gap: 2px;
+  opacity: 1;
+}
+.node-probe__bars span:hover {
+  transform: scaleY(1.55);
+}

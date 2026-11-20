@@ -5,7 +5,7 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 import AppProgressThin from '@/components/ui/AppProgressThin.vue'
 import type { IconName } from '@/constants/icons'
 import { resolveRegionCoordinates } from '@/domain/advanced-tools'
-import { homepageProbes, windowAverage } from '@/domain/probe-window'
+import { homepageProbes, windowAverage, latestProbeLatency, homepageLatencyText, homepageLossText } from '@/domain/probe-window'
 import { resolveNodeProvider } from '@/domain/provider'
 import {
   trafficDisplay,
@@ -18,9 +18,7 @@ import { trafficStatus, usageStatus } from '@/utils/progress-status'
 import {
   formatDisplayPrice,
   formatDisplaySpeed,
-  formatLatency,
   formatPercent,
-  formatProbePercent,
   formatUptime,
   MISSING_TEXT,
 } from '@/utils/format'
@@ -150,24 +148,22 @@ interface ListProbeRow {
 }
 
 /*
- * 与节点卡、上游一致：显示 `/api/servers` 已返回的窗口平均延迟与丢包，而不是最近一次采样
- * （上游 `useNodePingDisplay` 的 `latencyDisplay` / `lossDisplay` 取的是
- * `pingStats.avgLatency` / `avgLoss`）。站点关闭三网详情时窗口为空，回落到本次上报的最新值。
+ * 与节点卡、LuminaPlus v1.2.24 同源：延迟为最新成功探测，丢包按柱带样本权重计算。
+ * 没有有效样本显示 —，绝不把最新单次丢包当历史窗口平均。
  *
  * 列表行高固定 64px，三网用三行小字呈现，仍然保留运行时间那一行。
  */
 function probeRows(server: GlassServer): ListProbeRow[] {
   return homepageProbes(server.latency).map((probe) => {
-    const latency = windowAverage(server.history.latencySeries, probe.target)
     const loss = windowAverage(server.history.packetLossSeries, probe.target)
-    const latencyValue = latency.value ?? probe.latency
-    const lossValue = loss.value ?? probe.packetLoss
+    const latencyValue = latestProbeLatency(server.history, probe.target, probe.latency)
+    const lossValue = loss.value
     return {
       key: probe.target,
       label: probe.label,
-      latencyText: formatLatency(latencyValue),
-      lossText: formatProbePercent(lossValue),
-      title: `${probe.label}：延迟 ${formatLatency(latencyValue)}，丢包 ${formatProbePercent(lossValue)}`,
+      latencyText: homepageLatencyText(latencyValue),
+      lossText: homepageLossText(lossValue),
+      title: `${probe.label}：延迟 ${homepageLatencyText(latencyValue)}，丢包 ${homepageLossText(lossValue)}`,
     }
   })
 }

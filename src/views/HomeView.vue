@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useTimestamp } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import AppHeader from '@/components/dashboard/AppHeader.vue'
 import AdvancedTools from '@/components/dashboard/AdvancedTools.vue'
@@ -53,6 +54,7 @@ const theme = useThemeSettingsStore()
 const finance = useFinanceStore()
 const router = useRouter()
 const glassServerMapper = createGlassServerMapper()
+const probeClock = useTimestamp({ interval: 60_000 })
 const injectedSiteTitle = inject(injectedSiteTitleKey, null)
 const bootstrap = inject(bootstrapKey, null)
 const coldStartCover = bootstrap?.coverVisible ?? ref(false)
@@ -106,7 +108,7 @@ const generalStageClass = computed(() => {
 const metadataFields = computed(() => parseSettingKeys(theme.runtime.nodeListMetadataFields))
 const quickControlKeys = computed(() => resolveQuickControlKeys(theme.runtime))
 const glassServers = computed(() => (
-  glassServerMapper.map(serverStore.servers, app.config)
+  glassServerMapper.map(serverStore.servers, app.config, Math.max(probeClock.value, Date.now()))
 ))
 const summary = computed(() => summarizeServers(glassServers.value))
 /*
