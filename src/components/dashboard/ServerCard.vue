@@ -479,7 +479,6 @@ function hideMissingImage(event: Event): void {
         <div class="node-probe" @click.stop @keydown.stop>
           <div class="node-probe__head">
             <span>延迟</span>
-            <span class="node-probe__hint">点柱子查看</span>
           </div>
           <div v-for="row in probeRows" :key="row.key" class="node-probe__row">
             <div class="node-probe__row-head">
@@ -499,7 +498,6 @@ function hideMissingImage(event: Event): void {
         <div class="node-probe" @click.stop @keydown.stop>
           <div class="node-probe__head">
             <span>丢包</span>
-            <span class="node-probe__hint">点柱子查看</span>
           </div>
           <div v-for="row in probeRows" :key="row.key" class="node-probe__row">
             <div class="node-probe__row-head">
