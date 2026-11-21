@@ -62,7 +62,7 @@ export function buildProbeHistory(
   source: ProbeHistorySource,
   live: readonly ProbeLiveValue[],
   now = Date.now(),
-  options: { offlineSince?: number | null; windowMs?: number } = {},
+  options: { offlineSince?: number | null; windowMs?: number; measuredAt?: number } = {},
 ): GlassHistorySummary {
   // Join ping and loss on the same timestamp BEFORE merging local measurements.
   // Independent merges used to assign each metric a different timeline/weight.
@@ -78,5 +78,5 @@ export function buildProbeHistory(
       for (const target of PROBE_TARGETS) sample[metric][target] = point[target]
     }
   }
-  return buildHomepageProbeSeries([...byTime.values()], live, now, options.offlineSince, options.windowMs)
+  return buildHomepageProbeSeries([...byTime.values()], live, now, options.offlineSince, options.windowMs, options.measuredAt)
 }

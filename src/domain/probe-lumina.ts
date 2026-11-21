@@ -370,12 +370,13 @@ export function buildHomepageProbeSeries(
   now: number,
   offlineSince?: number | null,
   windowMs?: number,
+  measuredAt = now,
 ): { latencyLatest: Partial<Record<ProbeTarget, number>>; latencySeries: Partial<Record<ProbeTarget, GlassLatencySample[]>>; packetLossSeries: Partial<Record<ProbeTarget, GlassLatencySample[]>> } {
-  const fresh = (point: ProbeLiveValue) => Number.isFinite(point.time) && point.time > 0 && point.time <= now && now - point.time <= SAMPLE_TTL_MS
+  const fresh = (point: ProbeLiveValue) => Number.isFinite(point.time) && point.time > 0 && measuredAt - point.time <= SAMPLE_TTL_MS
   const convert = (point: ProbeLiveValue): PingLiveSample => ({ time: point.time, ping: snapshot(point.latency, point.loss) })
   const orderedWindow = window.filter(fresh).map(convert).sort((a, b) => a.time - b.time)
   const orderedLocal = local.filter(fresh).map(convert).sort((a, b) => a.time - b.time)
-  const samples = thinSamples(mergeWindowWithLocal(orderedWindow, orderedLocal, now))
+  const samples = thinSamples(mergeWindowWithLocal(orderedWindow, orderedLocal, measuredAt))
   const metricIntervalMs = resolveSampleIntervalMs(samples)
   const latencyLatest: Partial<Record<ProbeTarget, number>> = {}
   const latencySeries: Partial<Record<ProbeTarget, GlassLatencySample[]>> = {}

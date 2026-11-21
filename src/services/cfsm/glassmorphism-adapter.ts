@@ -11,7 +11,7 @@ import type {
 } from '@/types/glassmorphism'
 import { normalizeTimestampMilliseconds } from '@/utils/format'
 import { buildProbeHistory } from '@/domain/probe-buckets'
-import { getProbeLiveSamples, getProbeLiveRevision, probeLiveKey } from './probe-live'
+import { getProbeLiveSamples, getProbeLiveRevision, getProbeMeasurementTime, probeLiveKey } from './probe-live'
 
 function finiteNonNegative(value: number | null): number | null {
   return value !== null && Number.isFinite(value) && value >= 0 ? value : null
@@ -121,6 +121,7 @@ export function toGlassServer(server: CfsmServer, config: SiteConfig | null, now
       getProbeLiveSamples(probeLiveKey(server.source.base, server.id)),
       now,
       {
+        measuredAt: getProbeMeasurementTime(probeLiveKey(server.source.base, server.id), server.latencyWindow, server.packetLossWindow),
         offlineSince: server.online ? null : normalizeTimestampMilliseconds(server.lastUpdated ?? server.timestamp),
         windowMs: config?.latencyWindow.declared === true ? config.latencyWindow.hours * 60 * 60 * 1000 : undefined,
       },

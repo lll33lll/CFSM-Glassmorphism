@@ -1,5 +1,5 @@
 import { PROBE_TARGETS } from '@/constants/probes'
-import type { ProbeValues } from '@/types/cfsm'
+import type { LatencyWindowSample, ProbeValues } from '@/types/cfsm'
 import type { ProbeLiveValue } from '@/types/glassmorphism'
 
 /*
@@ -140,7 +140,7 @@ function hydrate(): void {
   }
 }
 
-/** Read only: Lumina's own cache is never rewritten or cleared. */
+/** Use fresh Lumina history as the cold-start baseline, without mixing our old cache. The reference cache stays read-only. */
 function seedLuminaSamples(key: string): void {
   if (luminaSeeded.has(key) || typeof location === 'undefined') return
   const separator = key.indexOf(':')
@@ -159,7 +159,6 @@ function seedLuminaSamples(key: string): void {
     if (!Array.isArray(entries)) return
     const now = Date.now()
     const byTime = new Map<number, ProbeLiveValue>()
-    for (const sample of samplesByServer.get(key) ?? EMPTY) if (isFresh(sample, now)) byTime.set(sample.time, sample)
     let added = 0
     for (const entry of entries) {
       const sample = fromPersisted(entry)
@@ -307,4 +306,29 @@ export function getProbeLiveRevision(key: string): number {
   hydrate()
   seedLuminaSamples(key)
   return revisionsByServer.get(key) ?? 0
+}
+
+
+interface ProbeMeasurementClock {
+  latency: readonly LatencyWindowSample[]
+  loss: readonly LatencyWindowSample[]
+  signature: string
+  revision: number
+  measuredAt: number
+}
+const measurementClocks = new Map<string, ProbeMeasurementClock>()
+
+export function getProbeMeasurementTime(
+  key: string,
+  latency: readonly LatencyWindowSample[],
+  loss: readonly LatencyWindowSample[],
+): number {
+  const revision = getProbeLiveRevision(key)
+  const previous = measurementClocks.get(key)
+  const signature = previous?.latency === latency && previous.loss === loss
+    ? previous.signature : JSON.stringify([latency, loss])
+  const measuredAt = previous?.revision === revision && previous.signature === signature
+    ? previous.measuredAt : Date.now()
+  measurementClocks.set(key, { latency, loss, signature, revision, measuredAt })
+  return measuredAt
 }
