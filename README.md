@@ -25,12 +25,14 @@ https://github.com/lll33lll/CFSM-Glassmorphism/tree/theme-custom
 ### 本次修复的固定版本
 
 ```text
-https://github.com/lll33lll/CFSM-Glassmorphism/tree/55c48e5b6c459d71d6e16e9ba6b731420d8ce1db
+https://github.com/lll33lll/CFSM-Glassmorphism/tree/52edd715c37e07c2f228e1b1944a85f535b6ee0d
 ```
 
 - **点按状态修复**：取消触屏卡片的悬停闪动；气泡独立渲染，关闭时柱子的缩放、亮度、透明度同步恢复；已去掉「点柱子查看」提示文字。
 
 - **历史与图表修复**：同一浏览器只读接续 LuminaPlus 已有真实探测样本，不修改其缓存；旧到达时间缓存不再复用，实时记录使用 sample.ts、过滤旧帧、重连不倒退，柱带按整分钟推进。资源图改用真实时间轴与实线，正常聚合间隔不再人为断线；真实空值与长时间断档仍保留。
+
+- **同浏览器基线修复**：有新鲜 LuminaPlus 历史时，原样作为启动基线，不再叠加 Glassmorphism 旧缓存；样本权重只在真实输入改变时重算，绘图分钟与采样时刻分开处理，分钟边界后的新样本不再提前剔除。原主题缓存仍只读，真实丢包仍保留。
 
 ## 预览
 
